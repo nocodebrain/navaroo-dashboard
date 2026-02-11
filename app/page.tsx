@@ -2,14 +2,20 @@
 
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, TrendingUp, TrendingDown, DollarSign, Activity, BarChart3, PieChart as PieChartIcon, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { parseXeroProfitLoss, parseXeroBalanceSheet, mergeXeroData, XeroMonthlyData } from '../lib/xero-parser';
+import DashboardHeader from '../components/DashboardHeader';
+import PeriodSelector from '../components/PeriodSelector';
+import KpiGrid from '../components/KpiGrid';
+import EmptyStatePanel from '../components/EmptyStatePanel';
+import ChartCard from '../components/ChartCard';
+import Sidebar from '../components/Sidebar';
+import { formatCurrency, formatPercent } from '../lib/formatters';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 const defaultData: XeroMonthlyData[] = [{
-  month: 'Feb 2026',
+  month: 'No Data',
   revenue: 0,
   costOfSales: 0,
   grossProfit: 0,
@@ -42,6 +48,7 @@ export default function NavarooDashboard() {
   const [forecastRevenue, setForecastRevenue] = useState<number>(0);
   const [showForecast, setShowForecast] = useState(false);
 
+  const hasData = data.length > 1 || (data.length === 1 && data[0].month !== 'No Data' && data[0].revenue > 0);
   const currentMonth = data[selectedMonthIndex] || defaultData[0];
   const comparisonMonth = comparisonMode === 'mom' 
     ? data[selectedMonthIndex + 1] 
@@ -106,30 +113,116 @@ export default function NavarooDashboard() {
     }
   };
 
-  const KPICard = ({ 
-    title, 
-    value, 
-    change, 
-    prefix = '$', 
-    suffix = '', 
-    borderColor,
-    positive = true 
-  }: any) => (
-    <div className={`bg-white rounded-xl p-6 shadow-sm border-l-4 ${borderColor}`}>
-      <p className="text-sm font-medium text-slate-600 mb-2">{title}</p>
-      <p className="text-3xl font-bold text-slate-900 mb-2">
-        {prefix}{typeof value === 'number' ? value.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : value}{suffix}
-      </p>
-      {change !== undefined && (
-        <div className={`flex items-center gap-1 text-sm font-semibold ${
-          (positive && change >= 0) || (!positive && change <= 0) ? 'text-green-600' : 'text-red-600'
-        }`}>
-          {change >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-          {Math.abs(change).toFixed(1)}% {comparisonMode === 'mom' ? 'MoM' : 'YoY'}
-        </div>
-      )}
-    </div>
-  );
+  const kpiData: Array<{
+    label: string;
+    value: number | null;
+    change?: number;
+    format: 'currency' | 'percent' | 'ratio';
+    color: string;
+    positive?: boolean;
+    helper?: string;
+  }> = [
+    {
+      label: 'Revenue',
+      value: hasData ? currentMonth.revenue : null,
+      change: hasData && comparisonMonth ? revenueChange : undefined,
+      format: 'currency',
+      color: 'green',
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    },
+    {
+      label: 'Gross Profit',
+      value: hasData ? currentMonth.grossProfit : null,
+      change: hasData && comparisonMonth ? calcChange(currentMonth.grossProfit, comparisonMonth.grossProfit) : undefined,
+      format: 'currency',
+      color: 'blue',
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    },
+    {
+      label: 'EBITDA',
+      value: hasData ? currentMonth.ebitda : null,
+      change: hasData && comparisonMonth ? ebitdaChange : undefined,
+      format: 'currency',
+      color: 'purple',
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    },
+    {
+      label: 'Net Profit',
+      value: hasData ? currentMonth.profit : null,
+      change: hasData && comparisonMonth ? profitChange : undefined,
+      format: 'currency',
+      color: 'orange',
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    },
+    {
+      label: 'Gross Margin',
+      value: hasData ? currentMonth.grossMargin : null,
+      format: 'percent',
+      color: 'green',
+      change: hasData && comparisonMonth ? calcChange(currentMonth.grossMargin, comparisonMonth.grossMargin) : undefined,
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    },
+    {
+      label: 'EBITDA Margin',
+      value: hasData ? currentMonth.ebitdaMargin : null,
+      format: 'percent',
+      color: 'purple',
+      change: hasData && comparisonMonth ? calcChange(currentMonth.ebitdaMargin, comparisonMonth.ebitdaMargin) : undefined,
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    },
+    {
+      label: 'OpEx Ratio',
+      value: hasData ? currentMonth.opexRatio : null,
+      format: 'percent',
+      color: 'red',
+      change: hasData && comparisonMonth ? calcChange(currentMonth.opexRatio, comparisonMonth.opexRatio) : undefined,
+      positive: false,
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    },
+    {
+      label: 'Working Capital',
+      value: hasData ? currentMonth.workingCapital : null,
+      format: 'currency',
+      color: 'blue',
+      change: hasData && comparisonMonth ? calcChange(currentMonth.workingCapital, comparisonMonth.workingCapital) : undefined,
+      helper: comparisonMode === 'mom' ? 'vs last month' : 'vs last year'
+    }
+  ];
+
+  const ratioKpis: Array<{
+    label: string;
+    value: number | null;
+    change?: number;
+    format: 'currency' | 'percent' | 'ratio';
+    color: string;
+    positive?: boolean;
+    helper?: string;
+  }> = hasData && currentMonth.currentRatio > 0 ? [
+    {
+      label: 'Current Ratio',
+      value: currentMonth.currentRatio,
+      format: 'ratio',
+      color: 'cyan'
+    },
+    {
+      label: 'Quick Ratio',
+      value: currentMonth.quickRatio,
+      format: 'ratio',
+      color: 'teal'
+    },
+    {
+      label: 'Accounts Receivable',
+      value: currentMonth.accountsReceivable,
+      format: 'currency',
+      color: 'indigo'
+    },
+    {
+      label: 'Accounts Payable',
+      value: currentMonth.accountsPayable,
+      format: 'currency',
+      color: 'pink'
+    }
+  ] : [];
 
   const trendData = data.slice(0, 12).reverse();
   const forecastData = showForecast && forecastRevenue > 0 ? [
@@ -145,355 +238,172 @@ export default function NavarooDashboard() {
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
-      <div className="w-64 bg-[#0f172a] text-white p-6 flex flex-col">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold">Navaroo</h1>
-          <p className="text-slate-400 text-sm">Financial Dashboard</p>
-        </div>
-        
-        <nav className="flex-1 space-y-2">
-          <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg bg-blue-600 text-white">
-            <Activity className="w-5 h-5" />
-            <span className="font-medium">Overview</span>
-          </a>
-          <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-slate-800">
-            <BarChart3 className="w-5 h-5" />
-            <span className="font-medium">Reports</span>
-          </a>
-          <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-slate-800">
-            <PieChartIcon className="w-5 h-5" />
-            <span className="font-medium">Analytics</span>
-          </a>
-        </nav>
+      <Sidebar 
+        onFileUpload={handleFileUpload}
+        uploading={uploading}
+        uploadStatus={uploadStatus}
+      />
 
-        <div className="mt-auto">
-          <label className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all cursor-pointer flex items-center justify-center gap-2 font-medium">
-            <Upload className="w-4 h-4" />
-            Upload Data
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileUpload}
-              className="hidden"
-              disabled={uploading}
-              multiple
-            />
-          </label>
-          {uploadStatus && (
-            <p className={`text-xs mt-2 ${
-              uploadStatus.includes('✓') ? 'text-green-400' : 
-              uploadStatus.includes('✗') ? 'text-red-400' : 
-              'text-yellow-400'
-            }`}>
-              {uploadStatus}
-            </p>
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-[1600px] mx-auto p-8">
+          <DashboardHeader />
+          
+          {!hasData && <EmptyStatePanel onUpload={() => document.getElementById('file-upload')?.click()} />}
+
+          {hasData && (
+            <>
+              <PeriodSelector
+                currentMonth={currentMonth.month}
+                selectedMonthIndex={selectedMonthIndex}
+                totalMonths={data.length}
+                comparisonMode={comparisonMode}
+                onMonthChange={setSelectedMonthIndex}
+                onComparisonChange={setComparisonMode}
+              />
+
+              <div className="space-y-8">
+                <KpiGrid kpis={kpiData} />
+                
+                {ratioKpis.length > 0 && <KpiGrid kpis={ratioKpis} />}
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <ChartCard title="Revenue vs Expenses (12 Months)" hasData={hasData}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <LineChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="month" stroke="#64748b" style={{ fontSize: '12px' }} />
+                        <YAxis stroke="#64748b" style={{ fontSize: '12px' }} tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`} />
+                        <Tooltip 
+                          formatter={(value) => formatCurrency(Number(value))}
+                          contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}
+                        />
+                        <Legend />
+                        <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} name="Revenue" dot={{ fill: '#10b981', r: 3 }} />
+                        <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} name="Expenses" dot={{ fill: '#ef4444', r: 3 }} />
+                        <Line type="monotone" dataKey="profit" stroke="#3b82f6" strokeWidth={2} name="Profit" dot={{ fill: '#3b82f6', r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+
+                  <ChartCard title="Expense Breakdown" hasData={!!(hasData && currentMonth.expenseBreakdown && currentMonth.expenseBreakdown.length > 0)}>
+                    {currentMonth.expenseBreakdown && currentMonth.expenseBreakdown.length > 0 ? (
+                      <>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <PieChart>
+                            <Pie
+                              data={currentMonth.expenseBreakdown}
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={70}
+                              fill="#8884d8"
+                              dataKey="amount"
+                              label={(entry: any) => `${entry.name} ${entry.percentage.toFixed(0)}%`}
+                              labelLine={false}
+                            >
+                              {currentMonth.expenseBreakdown.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="mt-4 space-y-2">
+                          {currentMonth.expenseBreakdown.slice(0, 5).map((cat, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-sm">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                                <span className="text-slate-700 font-medium">{cat.name}</span>
+                              </div>
+                              <span className="font-semibold text-slate-900">{formatCurrency(cat.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </ChartCard>
+                </div>
+
+                <ChartCard title="Revenue Forecast Model" hasData={hasData}>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Projected Revenue</label>
+                      <input
+                        type="number"
+                        value={forecastRevenue || ''}
+                        onChange={(e) => setForecastRevenue(Number(e.target.value))}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900"
+                        placeholder="Enter projected revenue"
+                      />
+                    </div>
+                    <button
+                      onClick={() => setShowForecast(!!forecastRevenue)}
+                      className="md:col-span-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-semibold mt-auto"
+                    >
+                      Apply Forecast
+                    </button>
+                    <button
+                      onClick={() => { setShowForecast(false); setForecastRevenue(0); }}
+                      className="md:col-span-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-all font-semibold mt-auto"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <AreaChart data={forecastData}>
+                      <defs>
+                        <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="month" stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <YAxis stroke="#64748b" style={{ fontSize: '12px' }} tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`} />
+                      <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0' }} />
+                      <Legend />
+                      <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" strokeWidth={2} name="Revenue" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+
+                {data.length > 1 && (
+                  <ChartCard title="Historical Performance" hasData={hasData}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b-2 border-slate-200">
+                            <th className="text-left py-3 px-4 text-sm font-bold text-slate-700">Month</th>
+                            <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Revenue</th>
+                            <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Gross Profit</th>
+                            <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">EBITDA</th>
+                            <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Net Profit</th>
+                            <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Margin %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.slice(0, 12).map((month, idx) => (
+                            <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                              <td className="py-3 px-4 text-sm font-semibold text-slate-900">{month.month}</td>
+                              <td className="py-3 px-4 text-sm text-right font-medium text-slate-900">{formatCurrency(month.revenue)}</td>
+                              <td className="py-3 px-4 text-sm text-right font-medium text-slate-700">{formatCurrency(month.grossProfit)}</td>
+                              <td className="py-3 px-4 text-sm text-right font-medium text-slate-700">{formatCurrency(month.ebitda)}</td>
+                              <td className={`py-3 px-4 text-sm text-right font-bold ${month.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {formatCurrency(month.profit)}
+                              </td>
+                              <td className={`py-3 px-4 text-sm text-right font-semibold ${month.grossMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {formatPercent(month.grossMargin)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </ChartCard>
+                )}
+              </div>
+            </>
           )}
         </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-8 overflow-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h2 className="text-3xl font-bold text-slate-900">Financial Overview</h2>
-            <p className="text-slate-600 mt-1">Real-time insights into your business performance</p>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            {/* Month Selector */}
-            <div className="flex items-center gap-2 bg-white rounded-lg shadow-sm px-4 py-2 border border-slate-200">
-              <button
-                onClick={() => setSelectedMonthIndex(Math.min(selectedMonthIndex + 1, data.length - 1))}
-                disabled={selectedMonthIndex >= data.length - 1}
-                className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
-              >
-                <ChevronLeft className="w-4 h-4 text-slate-700" />
-              </button>
-              <div className="flex items-center gap-2 min-w-[140px] justify-center">
-                <Calendar className="w-4 h-4 text-slate-600" />
-                <span className="font-semibold text-slate-900">{currentMonth.month}</span>
-              </div>
-              <button
-                onClick={() => setSelectedMonthIndex(Math.max(selectedMonthIndex - 1, 0))}
-                disabled={selectedMonthIndex === 0}
-                className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
-              >
-                <ChevronRight className="w-4 h-4 text-slate-700" />
-              </button>
-            </div>
-
-            {/* Comparison Toggle */}
-            <div className="flex bg-white rounded-lg shadow-sm border border-slate-200 p-1">
-              <button
-                onClick={() => setComparisonMode('mom')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  comparisonMode === 'mom' 
-                    ? 'bg-blue-600 text-white' 
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                MoM
-              </button>
-              <button
-                onClick={() => setComparisonMode('yoy')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  comparisonMode === 'yoy' 
-                    ? 'bg-blue-600 text-white' 
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                YoY
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* KPI Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <KPICard
-            title="Revenue"
-            value={currentMonth.revenue}
-            change={revenueChange}
-            borderColor="border-green-500"
-          />
-          <KPICard
-            title="Gross Profit"
-            value={currentMonth.grossProfit}
-            change={comparisonMonth ? calcChange(currentMonth.grossProfit, comparisonMonth.grossProfit) : 0}
-            borderColor="border-blue-500"
-          />
-          <KPICard
-            title="EBITDA"
-            value={currentMonth.ebitda}
-            change={ebitdaChange}
-            borderColor="border-purple-500"
-          />
-          <KPICard
-            title="Net Profit"
-            value={currentMonth.profit}
-            change={profitChange}
-            borderColor="border-orange-500"
-          />
-        </div>
-
-        {/* Margin Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <KPICard
-            title="Gross Margin"
-            value={currentMonth.grossMargin.toFixed(1)}
-            prefix=""
-            suffix="%"
-            borderColor="border-green-500"
-            change={comparisonMonth ? calcChange(currentMonth.grossMargin, comparisonMonth.grossMargin) : 0}
-          />
-          <KPICard
-            title="EBITDA Margin"
-            value={currentMonth.ebitdaMargin.toFixed(1)}
-            prefix=""
-            suffix="%"
-            borderColor="border-purple-500"
-            change={comparisonMonth ? calcChange(currentMonth.ebitdaMargin, comparisonMonth.ebitdaMargin) : 0}
-          />
-          <KPICard
-            title="OpEx Ratio"
-            value={currentMonth.opexRatio.toFixed(1)}
-            prefix=""
-            suffix="%"
-            borderColor="border-red-500"
-            change={comparisonMonth ? calcChange(currentMonth.opexRatio, comparisonMonth.opexRatio) : 0}
-            positive={false}
-          />
-          <KPICard
-            title="Working Capital"
-            value={currentMonth.workingCapital}
-            borderColor="border-blue-500"
-            change={comparisonMonth ? calcChange(currentMonth.workingCapital, comparisonMonth.workingCapital) : 0}
-          />
-        </div>
-
-        {/* Balance Sheet Ratios */}
-        {currentMonth.currentRatio > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <KPICard
-              title="Current Ratio"
-              value={currentMonth.currentRatio.toFixed(2)}
-              prefix=""
-              suffix=":1"
-              borderColor="border-cyan-500"
-            />
-            <KPICard
-              title="Quick Ratio"
-              value={currentMonth.quickRatio.toFixed(2)}
-              prefix=""
-              suffix=":1"
-              borderColor="border-teal-500"
-            />
-            <KPICard
-              title="Accounts Receivable"
-              value={currentMonth.accountsReceivable}
-              borderColor="border-indigo-500"
-            />
-            <KPICard
-              title="Accounts Payable"
-              value={currentMonth.accountsPayable}
-              borderColor="border-pink-500"
-            />
-          </div>
-        )}
-
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* Revenue vs Expenses Trend */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Revenue vs Expenses (12 Months)</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" stroke="#64748b" style={{ fontSize: '12px' }} />
-                <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                <Tooltip 
-                  formatter={(value) => `$${Number(value).toLocaleString()}`}
-                  contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}
-                />
-                <Legend />
-                <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={3} name="Revenue" dot={{ fill: '#10b981', r: 4 }} />
-                <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} name="Expenses" dot={{ fill: '#ef4444', r: 4 }} />
-                <Line type="monotone" dataKey="profit" stroke="#3b82f6" strokeWidth={3} name="Profit" dot={{ fill: '#3b82f6', r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Expense Breakdown */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Expense Breakdown</h3>
-            {currentMonth.expenseBreakdown && currentMonth.expenseBreakdown.length > 0 ? (
-              <>
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie
-                      data={currentMonth.expenseBreakdown}
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={70}
-                      fill="#8884d8"
-                      dataKey="amount"
-                      label={(entry: any) => `${entry.name} ${entry.percentage.toFixed(0)}%`}
-                      labelLine={false}
-                    >
-                      {currentMonth.expenseBreakdown.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="mt-4 space-y-2">
-                  {currentMonth.expenseBreakdown.slice(0, 5).map((cat, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                        <span className="text-slate-700 font-medium">{cat.name}</span>
-                      </div>
-                      <span className="font-semibold text-slate-900">${cat.amount.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="text-slate-500 text-center py-8">Upload data to see breakdown</p>
-            )}
-          </div>
-        </div>
-
-        {/* Forecast Tool */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 mb-8">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Revenue Forecast Model</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Projected Revenue</label>
-              <input
-                type="number"
-                value={forecastRevenue || ''}
-                onChange={(e) => setForecastRevenue(Number(e.target.value))}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900"
-                placeholder="Enter projected revenue"
-              />
-            </div>
-            <button
-              onClick={() => setShowForecast(!!forecastRevenue)}
-              className="md:col-span-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-semibold mt-auto"
-            >
-              Apply Forecast
-            </button>
-            <button
-              onClick={() => { setShowForecast(false); setForecastRevenue(0); }}
-              className="md:col-span-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-all font-semibold mt-auto"
-            >
-              Clear
-            </button>
-          </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={forecastData}>
-              <defs>
-                <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="month" stroke="#64748b" style={{ fontSize: '12px' }} />
-              <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-              <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0' }} />
-              <Legend />
-              <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" strokeWidth={2} name="Revenue" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Historical Table */}
-        {data.length > 1 && (
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Historical Performance</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b-2 border-slate-200">
-                    <th className="text-left py-3 px-4 text-sm font-bold text-slate-700">Month</th>
-                    <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Revenue</th>
-                    <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Gross Profit</th>
-                    <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">EBITDA</th>
-                    <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Net Profit</th>
-                    <th className="text-right py-3 px-4 text-sm font-bold text-slate-700">Margin %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.slice(0, 12).map((month, idx) => (
-                    <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="py-3 px-4 text-sm font-semibold text-slate-900">{month.month}</td>
-                      <td className="py-3 px-4 text-sm text-right font-medium text-slate-900">
-                        ${month.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
-                      </td>
-                      <td className="py-3 px-4 text-sm text-right font-medium text-slate-700">
-                        ${month.grossProfit.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
-                      </td>
-                      <td className="py-3 px-4 text-sm text-right font-medium text-slate-700">
-                        ${month.ebitda.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
-                      </td>
-                      <td className={`py-3 px-4 text-sm text-right font-bold ${month.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        ${month.profit.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
-                      </td>
-                      <td className={`py-3 px-4 text-sm text-right font-semibold ${month.grossMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {month.grossMargin.toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
