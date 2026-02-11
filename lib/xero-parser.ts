@@ -3,11 +3,26 @@ import * as XLSX from 'xlsx';
 export interface XeroMonthlyData {
   month: string;
   revenue: number;
+  costOfSales: number;
+  grossProfit: number;
+  grossMargin: number;
+  operatingExpenses: number;
+  depreciation: number;
+  ebitda: number;
+  ebitdaMargin: number;
   expenses: number;
   profit: number;
   assets: number;
+  currentAssets: number;
   liabilities: number;
+  currentLiabilities: number;
   equity: number;
+  accountsReceivable: number;
+  accountsPayable: number;
+  workingCapital: number;
+  currentRatio: number;
+  quickRatio: number;
+  opexRatio: number;
   expenseBreakdown?: ExpenseCategory[];
 }
 
@@ -28,7 +43,6 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
   const worksheet = workbook.Sheets[sheetName];
   const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-  // Find the header row
   let headerRowIndex = -1;
   let months: string[] = [];
   
@@ -42,36 +56,15 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
   }
 
   if (headerRowIndex === -1) {
-    throw new Error('Could not find header row with "Account" column');
+    throw new Error('Could not find header row');
   }
 
-  const sectionHeaders = [
-    'trading income',
-    'cost of sales',
-    'gross profit',
-    'other income',
-    'operating expenses',
-    'other expenses',
-    'less operating expenses',
-    'net profit',
-    'total trading income',
-    'total cost of sales',
-    'total operating expenses',
-    'total other income'
-  ];
-
-  // Parse accounts with categories
   const accounts: XeroAccountRow[] = [];
   for (let i = headerRowIndex + 1; i < rawData.length; i++) {
     const row = rawData[i];
     const accountName = row[0]?.toString().trim();
     
-    if (!accountName || accountName === '') continue;
-    
-    const accountLower = accountName.toLowerCase();
-    if (sectionHeaders.some(header => accountLower === header || accountLower.includes('total ' + header))) {
-      continue;
-    }
+    if (!accountName) continue;
     
     const values: Record<string, number> = {};
     months.forEach((month, index) => {
@@ -80,35 +73,44 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
       values[month] = !isNaN(numValue) ? numValue : 0;
     });
     
-    accounts.push({
-      account: accountName,
-      values
-    });
+    accounts.push({ account: accountName, values });
   }
 
-  // Calculate monthly summaries with detailed expense breakdown
   const monthlyData: XeroMonthlyData[] = [];
   
   months.forEach(month => {
     let revenue = 0;
-    let expenses = 0;
+    let costOfSales = 0;
+    let operatingExpenses = 0;
+    let depreciation = 0;
     const expenseCategories: Map<string, number> = new Map();
 
     accounts.forEach(account => {
       const value = account.values[month] || 0;
       const accountLower = account.account.toLowerCase();
       
-      // Revenue accounts
+      // Revenue
       if (accountLower.includes('sales') || 
           accountLower.includes('interest income') ||
           (accountLower.includes('income') && !accountLower.includes('cost'))) {
         revenue += Math.abs(value);
       }
-      // Expense accounts - categorize them
+      // Cost of Sales
+      else if (accountLower.includes('cost of') || 
+               accountLower.includes('cost-of') ||
+               accountLower.includes('cogs')) {
+        costOfSales += Math.abs(value);
+      }
+      // Depreciation (for EBITDA)
+      else if (accountLower.includes('depreciation') || accountLower.includes('amortization')) {
+        depreciation += Math.abs(value);
+        operatingExpenses += Math.abs(value);
+      }
+      // Operating Expenses
       else if (value > 0) {
-        expenses += value;
+        operatingExpenses += value;
         
-        // Categorize expenses
+        // Categorize
         if (accountLower.includes('wage') || accountLower.includes('salary')) {
           expenseCategories.set('Wages & Salaries', (expenseCategories.get('Wages & Salaries') || 0) + value);
         } else if (accountLower.includes('super')) {
@@ -118,48 +120,58 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
         } else if (accountLower.includes('equipment') || accountLower.includes('hire') || accountLower.includes('tool')) {
           expenseCategories.set('Equipment & Tools', (expenseCategories.get('Equipment & Tools') || 0) + value);
         } else if (accountLower.includes('subscription')) {
-          expenseCategories.set('Subscriptions & Software', (expenseCategories.get('Subscriptions & Software') || 0) + value);
+          expenseCategories.set('Subscriptions', (expenseCategories.get('Subscriptions') || 0) + value);
         } else if (accountLower.includes('rent')) {
           expenseCategories.set('Rent', (expenseCategories.get('Rent') || 0) + value);
-        } else if (accountLower.includes('professional') || accountLower.includes('legal') || accountLower.includes('accounting')) {
+        } else if (accountLower.includes('professional')) {
           expenseCategories.set('Professional Services', (expenseCategories.get('Professional Services') || 0) + value);
-        } else if (accountLower.includes('motor') || accountLower.includes('vehicle') || accountLower.includes('fuel')) {
-          expenseCategories.set('Vehicle & Transport', (expenseCategories.get('Vehicle & Transport') || 0) + value);
-        } else if (accountLower.includes('marketing') || accountLower.includes('advertising')) {
-          expenseCategories.set('Marketing', (expenseCategories.get('Marketing') || 0) + value);
-        } else if (accountLower.includes('depreciation')) {
-          expenseCategories.set('Depreciation', (expenseCategories.get('Depreciation') || 0) + value);
-        } else if (accountLower.includes('freight') || accountLower.includes('delivery')) {
-          expenseCategories.set('Freight & Delivery', (expenseCategories.get('Freight & Delivery') || 0) + value);
-        } else if (accountLower.includes('staff') || accountLower.includes('training') || accountLower.includes('welfare')) {
-          expenseCategories.set('Staff Development', (expenseCategories.get('Staff Development') || 0) + value);
-        } else if (accountLower.includes('protective') || accountLower.includes('clothing')) {
-          expenseCategories.set('Safety & PPE', (expenseCategories.get('Safety & PPE') || 0) + value);
+        } else if (accountLower.includes('motor') || accountLower.includes('vehicle')) {
+          expenseCategories.set('Vehicle', (expenseCategories.get('Vehicle') || 0) + value);
         } else {
-          expenseCategories.set('Other Expenses', (expenseCategories.get('Other Expenses') || 0) + value);
+          expenseCategories.set('Other', (expenseCategories.get('Other') || 0) + value);
         }
       }
     });
 
-    const profit = revenue - expenses;
+    const grossProfit = revenue - costOfSales;
+    const grossMargin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+    const totalExpenses = costOfSales + operatingExpenses;
+    const profit = revenue - totalExpenses;
+    const ebitda = profit + depreciation;
+    const ebitdaMargin = revenue > 0 ? (ebitda / revenue) * 100 : 0;
+    const opexRatio = revenue > 0 ? (operatingExpenses / revenue) * 100 : 0;
 
-    // Convert expense categories to array with percentages
     const expenseBreakdown: ExpenseCategory[] = Array.from(expenseCategories.entries())
       .map(([name, amount]) => ({
         name,
         amount,
-        percentage: expenses > 0 ? (amount / expenses) * 100 : 0
+        percentage: totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0
       }))
       .sort((a, b) => b.amount - a.amount);
 
     monthlyData.push({
       month,
       revenue,
-      expenses,
+      costOfSales,
+      grossProfit,
+      grossMargin,
+      operatingExpenses,
+      depreciation,
+      ebitda,
+      ebitdaMargin,
+      expenses: totalExpenses,
       profit,
       assets: 0,
+      currentAssets: 0,
       liabilities: 0,
+      currentLiabilities: 0,
       equity: 0,
+      accountsReceivable: 0,
+      accountsPayable: 0,
+      workingCapital: 0,
+      currentRatio: 0,
+      quickRatio: 0,
+      opexRatio,
       expenseBreakdown
     });
   });
@@ -167,7 +179,7 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
   return monthlyData;
 }
 
-export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { assets: number; liabilities: number; equity: number }> {
+export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, any> {
   const workbook = XLSX.read(file, { type: 'array' });
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
@@ -187,30 +199,63 @@ export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { asset
   }
 
   if (headerRowIndex === -1) {
-    throw new Error('Could not find header row in Balance Sheet');
+    return {};
   }
 
-  const result: Record<string, { assets: number; liabilities: number; equity: number }> = {};
-  
+  const result: Record<string, any> = {};
   months.forEach(month => {
-    result[month] = { assets: 0, liabilities: 0, equity: 0 };
+    result[month] = { 
+      assets: 0, 
+      currentAssets: 0,
+      liabilities: 0, 
+      currentLiabilities: 0,
+      equity: 0,
+      accountsReceivable: 0,
+      accountsPayable: 0
+    };
   });
 
-  let currentSection: 'assets' | 'liabilities' | 'equity' | null = null;
+  let currentSection: string | null = null;
   
   for (let i = headerRowIndex + 1; i < rawData.length; i++) {
     const row = rawData[i];
     const label = (row[0] || '').toString().trim().toLowerCase();
+    const accountName = (row[1] || '').toString().trim().toLowerCase();
     
     if (label === 'assets') {
       currentSection = 'assets';
+    } else if (label.includes('current assets')) {
+      currentSection = 'currentAssets';
     } else if (label.includes('liabilities')) {
       currentSection = 'liabilities';
+    } else if (label.includes('current liabilities')) {
+      currentSection = 'currentLiabilities';
     } else if (label === 'equity') {
       currentSection = 'equity';
-    } else if (label.includes('total assets') || 
-               label.includes('total liabilities') || 
-               label.includes('total equity')) {
+    }
+    
+    // Capture accounts receivable
+    if (accountName.includes('receivable') || accountName.includes('debtors')) {
+      months.forEach((month, index) => {
+        const value = parseFloat(row[index + 2]) || 0;
+        result[month].accountsReceivable += Math.abs(value);
+      });
+    }
+    
+    // Capture accounts payable
+    if (accountName.includes('payable') || accountName.includes('creditors')) {
+      months.forEach((month, index) => {
+        const value = parseFloat(row[index + 2]) || 0;
+        result[month].accountsPayable += Math.abs(value);
+      });
+    }
+    
+    // Capture section totals
+    if (label.includes('total assets') || 
+        label.includes('total current assets') ||
+        label.includes('total liabilities') || 
+        label.includes('total current liabilities') ||
+        label.includes('total equity')) {
       if (currentSection) {
         months.forEach((month, index) => {
           const value = parseFloat(row[index + 2]) || 0;
@@ -220,17 +265,34 @@ export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { asset
     }
   }
 
+  // Calculate working capital and ratios
+  months.forEach(month => {
+    const data = result[month];
+    data.workingCapital = data.currentAssets - data.currentLiabilities;
+    data.currentRatio = data.currentLiabilities > 0 ? data.currentAssets / data.currentLiabilities : 0;
+    data.quickRatio = data.currentLiabilities > 0 
+      ? (data.currentAssets - 0) / data.currentLiabilities 
+      : 0;
+  });
+
   return result;
 }
 
 export function mergeXeroData(plData: XeroMonthlyData[], bsData: Record<string, any>): XeroMonthlyData[] {
   return plData.map(monthData => {
-    const balanceSheet = bsData[monthData.month] || { assets: 0, liabilities: 0, equity: 0 };
+    const bs = bsData[monthData.month] || {};
     return {
       ...monthData,
-      assets: balanceSheet.assets,
-      liabilities: balanceSheet.liabilities,
-      equity: balanceSheet.equity
+      assets: bs.assets || 0,
+      currentAssets: bs.currentAssets || 0,
+      liabilities: bs.liabilities || 0,
+      currentLiabilities: bs.currentLiabilities || 0,
+      equity: bs.equity || 0,
+      accountsReceivable: bs.accountsReceivable || 0,
+      accountsPayable: bs.accountsPayable || 0,
+      workingCapital: bs.workingCapital || 0,
+      currentRatio: bs.currentRatio || 0,
+      quickRatio: bs.quickRatio || 0
     };
   });
 }
