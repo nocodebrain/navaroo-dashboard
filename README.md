@@ -1,6 +1,6 @@
-# Navaroo & Visionex Solutions Dashboard
+# Navaroo Financial Dashboard
 
-Business performance dashboard that **automatically parses Xero exports** with support for direct Xero API integration.
+Business performance dashboard for Navaroo Pty Ltd that **automatically parses Xero exports** with support for direct Xero API integration.
 
 ## ✅ What's Working Now
 

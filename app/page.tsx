@@ -132,8 +132,8 @@ export default function NavarooVisionexDashboard() {
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">Navaroo & Visionex Solutions</h1>
-              <p className="text-slate-600 mt-1">Business Performance Dashboard - Powered by Xero</p>
+              <h1 className="text-3xl font-bold text-slate-900">Navaroo Pty Ltd</h1>
+              <p className="text-slate-600 mt-1">Financial Dashboard</p>
             </div>
             <div className="flex gap-3">
               {xeroConnected ? (
