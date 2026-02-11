@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, TrendingUp, TrendingDown, DollarSign, Building2, FileText, Calendar, Link as LinkIcon } from 'lucide-react';
+import { Upload, TrendingUp, TrendingDown, DollarSign, Building2, FileText, Calendar, Link as LinkIcon, RefreshCw } from 'lucide-react';
 import { parseXeroProfitLoss, parseXeroBalanceSheet, mergeXeroData, XeroMonthlyData } from '../lib/xero-parser';
 
 const defaultData: XeroMonthlyData[] = [
@@ -22,11 +22,53 @@ export default function NavarooVisionexDashboard() {
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>('');
   const [xeroConnected, setXeroConnected] = useState(false);
+  const [loadingXero, setLoadingXero] = useState(false);
+
+  // Check if Xero is connected on load
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('xero') === 'connected') {
+      setXeroConnected(true);
+      setUploadStatus('✓ Successfully connected to Xero!');
+      fetchXeroData();
+      // Clean URL
+      window.history.replaceState({}, '', '/');
+    }
+  }, []);
 
   const currentMonth = data[0] || defaultData[0];
   const profitMargin = currentMonth.revenue > 0
     ? Math.round((currentMonth.profit / currentMonth.revenue) * 100)
     : 0;
+
+  const fetchXeroData = async () => {
+    setLoadingXero(true);
+    setUploadStatus('Loading data from Xero...');
+
+    try {
+      const response = await fetch('/api/xero/reports');
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        setData(result.data);
+        setXeroConnected(true);
+        setUploadStatus(`✓ Loaded ${result.data.length} month(s) from Xero`);
+      } else {
+        throw new Error(result.error || 'Failed to fetch Xero data');
+      }
+    } catch (error: any) {
+      console.error('Error fetching Xero data:', error);
+      setUploadStatus(`✗ Error: ${error.message}`);
+      setXeroConnected(false);
+    } finally {
+      setLoadingXero(false);
+      setTimeout(() => setUploadStatus(''), 5000);
+    }
+  };
+
+  const connectXero = () => {
+    window.location.href = '/api/xero/auth';
+  };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -39,22 +81,18 @@ export default function NavarooVisionexDashboard() {
       let plData: XeroMonthlyData[] = [];
       let bsData: Record<string, any> = {};
 
-      // Process all uploaded files
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const fileName = file.name.toLowerCase();
         const buffer = await file.arrayBuffer();
 
         if (fileName.includes('profit') || fileName.includes('p&l') || fileName.includes('pl')) {
-          // Profit & Loss file
           setUploadStatus('Parsing Profit & Loss...');
           plData = parseXeroProfitLoss(buffer);
         } else if (fileName.includes('balance') || fileName.includes('bs')) {
-          // Balance Sheet file
           setUploadStatus('Parsing Balance Sheet...');
           bsData = parseXeroBalanceSheet(buffer);
         } else {
-          // Try to detect which type
           const workbook = XLSX.read(buffer, { type: 'array' });
           const sheetName = workbook.SheetNames[0].toLowerCase();
           
@@ -63,14 +101,12 @@ export default function NavarooVisionexDashboard() {
           } else if (sheetName.includes('balance')) {
             bsData = parseXeroBalanceSheet(buffer);
           } else {
-            // Assume P&L if not clear
             plData = parseXeroProfitLoss(buffer);
           }
         }
       }
 
       if (plData.length > 0) {
-        // Merge balance sheet data if available
         const mergedData = Object.keys(bsData).length > 0 
           ? mergeXeroData(plData, bsData)
           : plData;
@@ -82,17 +118,11 @@ export default function NavarooVisionexDashboard() {
       }
     } catch (error: any) {
       console.error('File upload error:', error);
-      setUploadStatus(`✗ Error: ${error.message || 'Could not parse Xero file. Please ensure it\'s a standard Xero export.'}`);
+      setUploadStatus(`✗ Error: ${error.message || 'Could not parse Xero file.'}`);
     } finally {
       setUploading(false);
       setTimeout(() => setUploadStatus(''), 7000);
     }
-  };
-
-  const connectXero = () => {
-    // This would initiate OAuth flow
-    setUploadStatus('⚠ Xero OAuth integration requires setup. See instructions below.');
-    setTimeout(() => setUploadStatus(''), 5000);
   };
 
   return (
@@ -106,20 +136,27 @@ export default function NavarooVisionexDashboard() {
               <p className="text-slate-600 mt-1">Business Performance Dashboard - Powered by Xero</p>
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={connectXero}
-                className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                  xeroConnected 
-                    ? 'bg-green-600 text-white hover:bg-green-700' 
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                }`}
-              >
-                <LinkIcon className="w-4 h-4" />
-                {xeroConnected ? 'Connected to Xero' : 'Connect Xero'}
-              </button>
+              {xeroConnected ? (
+                <button
+                  onClick={fetchXeroData}
+                  disabled={loadingXero}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingXero ? 'animate-spin' : ''}`} />
+                  {loadingXero ? 'Loading...' : 'Refresh from Xero'}
+                </button>
+              ) : (
+                <button
+                  onClick={connectXero}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <LinkIcon className="w-4 h-4" />
+                  Connect Xero
+                </button>
+              )}
               <label className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors cursor-pointer flex items-center gap-2">
                 <Upload className="w-4 h-4" />
-                Upload Xero Files
+                Upload Files
                 <input
                   type="file"
                   accept=".xlsx,.xls"
@@ -225,8 +262,6 @@ export default function NavarooVisionexDashboard() {
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Expenses</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Profit</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Margin %</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Assets</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Liabilities</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -249,12 +284,6 @@ export default function NavarooVisionexDashboard() {
                         <td className={`py-3 px-4 text-sm text-right font-medium ${margin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {margin}%
                         </td>
-                        <td className="py-3 px-4 text-sm text-right text-slate-700">
-                          {month.assets > 0 ? `$${month.assets.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-'}
-                        </td>
-                        <td className="py-3 px-4 text-sm text-right text-slate-700">
-                          {month.liabilities > 0 ? `$${month.liabilities.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-'}
-                        </td>
                       </tr>
                     );
                   })}
@@ -266,43 +295,33 @@ export default function NavarooVisionexDashboard() {
 
         {/* Instructions */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Upload Instructions */}
           <div className="bg-blue-50 rounded-xl p-6">
             <h3 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
               <FileText className="w-5 h-5" />
               Upload from Xero
             </h3>
             <ol className="list-decimal list-inside space-y-2 text-blue-800 text-sm">
-              <li>Log into your Xero account</li>
+              <li>Log into Xero</li>
               <li>Go to Reports → Profit and Loss</li>
-              <li>Select date range (e.g., last 12 months)</li>
-              <li>Click "Export" → Excel (.xlsx)</li>
-              <li>Repeat for Balance Sheet if needed</li>
-              <li>Upload both files here using "Upload Xero Files"</li>
+              <li>Select date range (last 12 months)</li>
+              <li>Export as Excel (.xlsx)</li>
+              <li>Upload here using "Upload Files"</li>
             </ol>
-            <p className="text-blue-700 text-sm mt-4">
-              The dashboard will automatically parse your Xero reports and display all historical data.
-            </p>
           </div>
 
-          {/* Xero API Instructions */}
           <div className="bg-green-50 rounded-xl p-6">
             <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
               <LinkIcon className="w-5 h-5" />
-              Connect Xero API (Coming Soon)
+              Direct Xero Connection
             </h3>
-            <p className="text-green-800 text-sm mb-3">
-              For automatic syncing, we'll need to set up Xero OAuth:
-            </p>
             <ol className="list-decimal list-inside space-y-2 text-green-800 text-sm">
-              <li>Create a Xero app at developer.xero.com</li>
-              <li>Get Client ID and Client Secret</li>
-              <li>Add OAuth redirect URL</li>
-              <li>Enable accounting.reports.read scope</li>
-              <li>Configure credentials in dashboard</li>
+              <li>Click "Connect Xero" above</li>
+              <li>Authorize access to your Xero account</li>
+              <li>Dashboard automatically pulls latest data</li>
+              <li>Click "Refresh" anytime for updated data</li>
             </ol>
             <p className="text-green-700 text-sm mt-4 font-medium">
-              Once connected, the dashboard will automatically pull your latest Xero data monthly.
+              No manual exports needed! Data updates with one click.
             </p>
           </div>
         </div>
