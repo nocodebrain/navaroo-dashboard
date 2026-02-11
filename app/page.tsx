@@ -2,115 +2,97 @@
 
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, TrendingUp, TrendingDown, DollarSign, Users, FileText, Calendar } from 'lucide-react';
+import { Upload, TrendingUp, TrendingDown, DollarSign, Building2, FileText, Calendar, Link as LinkIcon } from 'lucide-react';
+import { parseXeroProfitLoss, parseXeroBalanceSheet, mergeXeroData, XeroMonthlyData } from '../lib/xero-parser';
 
-interface MonthlyData {
-  month: string;
-  revenue: number;
-  expenses: number;
-  profit: number;
-  activeClients: number;
-  newClients: number;
-  tendersSubmitted: number;
-  tendersWon: number;
-}
-
-const defaultData: MonthlyData[] = [
+const defaultData: XeroMonthlyData[] = [
   {
-    month: 'January 2026',
-    revenue: 125000,
-    expenses: 78000,
-    profit: 47000,
-    activeClients: 12,
-    newClients: 3,
-    tendersSubmitted: 8,
-    tendersWon: 3
+    month: 'Feb 2026',
+    revenue: 0,
+    expenses: 0,
+    profit: 0,
+    assets: 0,
+    liabilities: 0,
+    equity: 0
   }
 ];
 
 export default function NavarooVisionexDashboard() {
-  const [data, setData] = useState<MonthlyData[]>(defaultData);
+  const [data, setData] = useState<XeroMonthlyData[]>(defaultData);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>('');
+  const [xeroConnected, setXeroConnected] = useState(false);
 
-  const currentMonth = data[data.length - 1] || defaultData[0];
-  const winRate = currentMonth.tendersSubmitted > 0 
-    ? Math.round((currentMonth.tendersWon / currentMonth.tendersSubmitted) * 100)
-    : 0;
+  const currentMonth = data[0] || defaultData[0];
   const profitMargin = currentMonth.revenue > 0
     ? Math.round((currentMonth.profit / currentMonth.revenue) * 100)
     : 0;
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
     setUploading(true);
-    setUploadStatus('Processing file...');
+    setUploadStatus('Processing files...');
 
     try {
-      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      let plData: XeroMonthlyData[] = [];
+      let bsData: Record<string, any> = {};
 
-      if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-        // Handle Excel files
+      // Process all uploaded files
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileName = file.name.toLowerCase();
         const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
 
-        // Parse the Excel data
-        const parsedData: MonthlyData[] = jsonData.map((row: any) => ({
-          month: row['Month'] || row['month'] || '',
-          revenue: parseFloat(row['Revenue'] || row['revenue'] || 0),
-          expenses: parseFloat(row['Expenses'] || row['expenses'] || 0),
-          profit: parseFloat(row['Profit'] || row['profit'] || 0),
-          activeClients: parseInt(row['Active Clients'] || row['activeClients'] || 0),
-          newClients: parseInt(row['New Clients'] || row['newClients'] || 0),
-          tendersSubmitted: parseInt(row['Tenders Submitted'] || row['tendersSubmitted'] || 0),
-          tendersWon: parseInt(row['Tenders Won'] || row['tendersWon'] || 0)
-        }));
-
-        if (parsedData.length > 0) {
-          setData(parsedData);
-          setUploadStatus(`✓ Successfully loaded ${parsedData.length} month(s) of data`);
+        if (fileName.includes('profit') || fileName.includes('p&l') || fileName.includes('pl')) {
+          // Profit & Loss file
+          setUploadStatus('Parsing Profit & Loss...');
+          plData = parseXeroProfitLoss(buffer);
+        } else if (fileName.includes('balance') || fileName.includes('bs')) {
+          // Balance Sheet file
+          setUploadStatus('Parsing Balance Sheet...');
+          bsData = parseXeroBalanceSheet(buffer);
         } else {
-          setUploadStatus('⚠ No valid data found in file');
+          // Try to detect which type
+          const workbook = XLSX.read(buffer, { type: 'array' });
+          const sheetName = workbook.SheetNames[0].toLowerCase();
+          
+          if (sheetName.includes('profit') || sheetName.includes('loss')) {
+            plData = parseXeroProfitLoss(buffer);
+          } else if (sheetName.includes('balance')) {
+            bsData = parseXeroBalanceSheet(buffer);
+          } else {
+            // Assume P&L if not clear
+            plData = parseXeroProfitLoss(buffer);
+          }
         }
-      } else if (fileExtension === 'pdf') {
-        setUploadStatus('⚠ PDF parsing requires backend processing. Please use Excel format for now.');
-      } else {
-        setUploadStatus('⚠ Unsupported file type. Please upload Excel (.xlsx, .xls) files.');
       }
-    } catch (error) {
+
+      if (plData.length > 0) {
+        // Merge balance sheet data if available
+        const mergedData = Object.keys(bsData).length > 0 
+          ? mergeXeroData(plData, bsData)
+          : plData;
+        
+        setData(mergedData);
+        setUploadStatus(`✓ Successfully loaded ${mergedData.length} month(s) of data from Xero exports`);
+      } else {
+        setUploadStatus('⚠ No valid Xero data found. Please upload Profit & Loss report from Xero.');
+      }
+    } catch (error: any) {
       console.error('File upload error:', error);
-      setUploadStatus('✗ Error processing file. Please check the format and try again.');
+      setUploadStatus(`✗ Error: ${error.message || 'Could not parse Xero file. Please ensure it\'s a standard Xero export.'}`);
     } finally {
       setUploading(false);
-      // Clear status after 5 seconds
-      setTimeout(() => setUploadStatus(''), 5000);
+      setTimeout(() => setUploadStatus(''), 7000);
     }
   };
 
-  const downloadTemplate = () => {
-    // Create template Excel file
-    const template = [
-      {
-        'Month': 'January 2026',
-        'Revenue': 125000,
-        'Expenses': 78000,
-        'Profit': 47000,
-        'Active Clients': 12,
-        'New Clients': 3,
-        'Tenders Submitted': 8,
-        'Tenders Won': 3
-      }
-    ];
-
-    const worksheet = XLSX.utils.json_to_sheet(template);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Monthly Data');
-    XLSX.writeFile(workbook, 'navaroo-visionex-template.xlsx');
+  const connectXero = () => {
+    // This would initiate OAuth flow
+    setUploadStatus('⚠ Xero OAuth integration requires setup. See instructions below.');
+    setTimeout(() => setUploadStatus(''), 5000);
   };
 
   return (
@@ -121,25 +103,30 @@ export default function NavarooVisionexDashboard() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-900">Navaroo & Visionex Solutions</h1>
-              <p className="text-slate-600 mt-1">Business Performance Dashboard</p>
+              <p className="text-slate-600 mt-1">Business Performance Dashboard - Powered by Xero</p>
             </div>
             <div className="flex gap-3">
               <button
-                onClick={downloadTemplate}
-                className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors flex items-center gap-2"
+                onClick={connectXero}
+                className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                  xeroConnected 
+                    ? 'bg-green-600 text-white hover:bg-green-700' 
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
               >
-                <FileText className="w-4 h-4" />
-                Download Template
+                <LinkIcon className="w-4 h-4" />
+                {xeroConnected ? 'Connected to Xero' : 'Connect Xero'}
               </button>
-              <label className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer flex items-center gap-2">
+              <label className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors cursor-pointer flex items-center gap-2">
                 <Upload className="w-4 h-4" />
-                Upload Data
+                Upload Xero Files
                 <input
                   type="file"
-                  accept=".xlsx,.xls,.pdf"
+                  accept=".xlsx,.xls"
                   onChange={handleFileUpload}
                   className="hidden"
                   disabled={uploading}
+                  multiple
                 />
               </label>
             </div>
@@ -161,14 +148,14 @@ export default function NavarooVisionexDashboard() {
             <Calendar className="w-5 h-5 text-blue-600" />
             <h2 className="text-xl font-semibold text-slate-900">{currentMonth.month}</h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-lg">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-green-700 text-sm font-medium">Revenue</span>
                 <DollarSign className="w-5 h-5 text-green-600" />
               </div>
               <p className="text-2xl font-bold text-green-900">
-                ${currentMonth.revenue.toLocaleString()}
+                ${currentMonth.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
             </div>
 
@@ -178,57 +165,57 @@ export default function NavarooVisionexDashboard() {
                 <TrendingDown className="w-5 h-5 text-red-600" />
               </div>
               <p className="text-2xl font-bold text-red-900">
-                ${currentMonth.expenses.toLocaleString()}
+                ${currentMonth.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
             </div>
 
             <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-blue-700 text-sm font-medium">Profit</span>
+                <span className="text-blue-700 text-sm font-medium">Net Profit</span>
                 <TrendingUp className="w-5 h-5 text-blue-600" />
               </div>
               <p className="text-2xl font-bold text-blue-900">
-                ${currentMonth.profit.toLocaleString()}
+                ${currentMonth.profit.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
               <p className="text-sm text-blue-700 mt-1">{profitMargin}% margin</p>
             </div>
+          </div>
+        </div>
 
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-purple-700 text-sm font-medium">Active Clients</span>
-                <Users className="w-5 h-5 text-purple-600" />
+        {/* Balance Sheet Overview */}
+        {(currentMonth.assets > 0 || currentMonth.liabilities > 0) && (
+          <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <h2 className="text-xl font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-slate-600" />
+              Balance Sheet
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-lg">
+                <span className="text-purple-700 text-sm font-medium block mb-2">Total Assets</span>
+                <p className="text-2xl font-bold text-purple-900">
+                  ${currentMonth.assets.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
               </div>
-              <p className="text-2xl font-bold text-purple-900">
-                {currentMonth.activeClients}
-              </p>
-              <p className="text-sm text-purple-700 mt-1">+{currentMonth.newClients} new</p>
+              <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-4 rounded-lg">
+                <span className="text-orange-700 text-sm font-medium block mb-2">Total Liabilities</span>
+                <p className="text-2xl font-bold text-orange-900">
+                  ${currentMonth.liabilities.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              </div>
+              <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 p-4 rounded-lg">
+                <span className="text-indigo-700 text-sm font-medium block mb-2">Equity</span>
+                <p className="text-2xl font-bold text-indigo-900">
+                  ${currentMonth.equity.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-
-        {/* Tender Performance */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h2 className="text-xl font-semibold text-slate-900 mb-4">Tender Performance</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="text-center">
-              <p className="text-4xl font-bold text-slate-900">{currentMonth.tendersSubmitted}</p>
-              <p className="text-slate-600 mt-2">Tenders Submitted</p>
-            </div>
-            <div className="text-center">
-              <p className="text-4xl font-bold text-green-600">{currentMonth.tendersWon}</p>
-              <p className="text-slate-600 mt-2">Tenders Won</p>
-            </div>
-            <div className="text-center">
-              <p className="text-4xl font-bold text-blue-600">{winRate}%</p>
-              <p className="text-slate-600 mt-2">Win Rate</p>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Historical Data Table */}
         {data.length > 1 && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Historical Data</h2>
+          <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <h2 className="text-xl font-semibold text-slate-900 mb-4">Historical Performance</h2>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -237,32 +224,36 @@ export default function NavarooVisionexDashboard() {
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Revenue</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Expenses</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Profit</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Clients</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Win Rate</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Margin %</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Assets</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Liabilities</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.map((month, index) => {
-                    const monthWinRate = month.tendersSubmitted > 0
-                      ? Math.round((month.tendersWon / month.tendersSubmitted) * 100)
+                    const margin = month.revenue > 0 
+                      ? Math.round((month.profit / month.revenue) * 100)
                       : 0;
                     return (
                       <tr key={index} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="py-3 px-4 text-sm text-slate-900">{month.month}</td>
+                        <td className="py-3 px-4 text-sm text-slate-900 font-medium">{month.month}</td>
                         <td className="py-3 px-4 text-sm text-right text-slate-900">
-                          ${month.revenue.toLocaleString()}
-                        </td>
-                        <td className="py-3 px-4 text-sm text-right text-slate-900">
-                          ${month.expenses.toLocaleString()}
-                        </td>
-                        <td className="py-3 px-4 text-sm text-right font-medium text-green-600">
-                          ${month.profit.toLocaleString()}
+                          ${month.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         </td>
                         <td className="py-3 px-4 text-sm text-right text-slate-900">
-                          {month.activeClients}
+                          ${month.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         </td>
-                        <td className="py-3 px-4 text-sm text-right font-medium text-blue-600">
-                          {monthWinRate}%
+                        <td className={`py-3 px-4 text-sm text-right font-medium ${month.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          ${month.profit.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </td>
+                        <td className={`py-3 px-4 text-sm text-right font-medium ${margin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {margin}%
+                        </td>
+                        <td className="py-3 px-4 text-sm text-right text-slate-700">
+                          {month.assets > 0 ? `$${month.assets.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-'}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-right text-slate-700">
+                          {month.liabilities > 0 ? `$${month.liabilities.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-'}
                         </td>
                       </tr>
                     );
@@ -273,18 +264,47 @@ export default function NavarooVisionexDashboard() {
           </div>
         )}
 
-        {/* Upload Instructions */}
-        <div className="mt-6 bg-blue-50 rounded-xl p-6">
-          <h3 className="font-semibold text-blue-900 mb-2">How to Update Monthly Data</h3>
-          <ol className="list-decimal list-inside space-y-2 text-blue-800 text-sm">
-            <li>Click "Download Template" to get the Excel template with the correct column structure</li>
-            <li>Fill in your monthly data in Excel (Revenue, Expenses, Profit, Active Clients, New Clients, Tenders Submitted, Tenders Won)</li>
-            <li>Click "Upload Data" and select your completed Excel file</li>
-            <li>The dashboard will automatically update with your new data</li>
-          </ol>
-          <p className="text-blue-700 text-sm mt-4">
-            <strong>Supported formats:</strong> Excel (.xlsx, .xls). PDF support requires backend processing.
-          </p>
+        {/* Instructions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Upload Instructions */}
+          <div className="bg-blue-50 rounded-xl p-6">
+            <h3 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Upload from Xero
+            </h3>
+            <ol className="list-decimal list-inside space-y-2 text-blue-800 text-sm">
+              <li>Log into your Xero account</li>
+              <li>Go to Reports → Profit and Loss</li>
+              <li>Select date range (e.g., last 12 months)</li>
+              <li>Click "Export" → Excel (.xlsx)</li>
+              <li>Repeat for Balance Sheet if needed</li>
+              <li>Upload both files here using "Upload Xero Files"</li>
+            </ol>
+            <p className="text-blue-700 text-sm mt-4">
+              The dashboard will automatically parse your Xero reports and display all historical data.
+            </p>
+          </div>
+
+          {/* Xero API Instructions */}
+          <div className="bg-green-50 rounded-xl p-6">
+            <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
+              <LinkIcon className="w-5 h-5" />
+              Connect Xero API (Coming Soon)
+            </h3>
+            <p className="text-green-800 text-sm mb-3">
+              For automatic syncing, we'll need to set up Xero OAuth:
+            </p>
+            <ol className="list-decimal list-inside space-y-2 text-green-800 text-sm">
+              <li>Create a Xero app at developer.xero.com</li>
+              <li>Get Client ID and Client Secret</li>
+              <li>Add OAuth redirect URL</li>
+              <li>Enable accounting.reports.read scope</li>
+              <li>Configure credentials in dashboard</li>
+            </ol>
+            <p className="text-green-700 text-sm mt-4 font-medium">
+              Once connected, the dashboard will automatically pull your latest Xero data monthly.
+            </p>
+          </div>
         </div>
       </div>
     </div>
