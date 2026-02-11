@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, TrendingUp, TrendingDown, DollarSign, Building2, FileText, Calendar, Link as LinkIcon, RefreshCw } from 'lucide-react';
+import { Upload, TrendingUp, TrendingDown, DollarSign, Calendar, RefreshCw, AlertCircle, Activity } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { parseXeroProfitLoss, parseXeroBalanceSheet, mergeXeroData, XeroMonthlyData } from '../lib/xero-parser';
+
+const COLORS = ['#10b981', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
 
 const defaultData: XeroMonthlyData[] = [
   {
@@ -17,29 +20,75 @@ const defaultData: XeroMonthlyData[] = [
   }
 ];
 
-export default function NavarooVisionexDashboard() {
+export default function NavarooFinancialDashboard() {
   const [data, setData] = useState<XeroMonthlyData[]>(defaultData);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>('');
   const [xeroConnected, setXeroConnected] = useState(false);
   const [loadingXero, setLoadingXero] = useState(false);
+  const [forecastRevenue, setForecastRevenue] = useState<number>(0);
+  const [forecastExpenses, setForecastExpenses] = useState<number>(0);
+  const [showForecast, setShowForecast] = useState(false);
 
-  // Check if Xero is connected on load
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('xero') === 'connected') {
       setXeroConnected(true);
       setUploadStatus('✓ Successfully connected to Xero!');
       fetchXeroData();
-      // Clean URL
       window.history.replaceState({}, '', '/');
     }
   }, []);
 
   const currentMonth = data[0] || defaultData[0];
-  const profitMargin = currentMonth.revenue > 0
-    ? Math.round((currentMonth.profit / currentMonth.revenue) * 100)
+  const previousMonth = data[1] || currentMonth;
+
+  // Calculate month-over-month changes
+  const revenueChange = previousMonth.revenue > 0 
+    ? ((currentMonth.revenue - previousMonth.revenue) / previousMonth.revenue) * 100 
     : 0;
+  const expensesChange = previousMonth.expenses > 0
+    ? ((currentMonth.expenses - previousMonth.expenses) / previousMonth.expenses) * 100
+    : 0;
+  const profitChange = previousMonth.profit !== 0
+    ? ((currentMonth.profit - previousMonth.profit) / Math.abs(previousMonth.profit)) * 100
+    : 0;
+
+  const profitMargin = currentMonth.revenue > 0
+    ? (currentMonth.profit / currentMonth.revenue) * 100
+    : 0;
+
+  // Calculate cash flow (simplified: revenue - expenses)
+  const cashFlow = data.slice(0, 6).reverse().map(month => ({
+    month: month.month,
+    inflow: month.revenue,
+    outflow: month.expenses,
+    net: month.profit
+  }));
+
+  // Prepare forecast data
+  const forecastData = showForecast && forecastRevenue > 0 ? [
+    ...data.slice(0, 6).reverse(),
+    {
+      month: 'Forecast',
+      revenue: forecastRevenue,
+      expenses: forecastExpenses || (currentMonth.expenses * 1.05), // Default 5% increase
+      profit: forecastRevenue - (forecastExpenses || (currentMonth.expenses * 1.05)),
+      assets: 0,
+      liabilities: 0,
+      equity: 0
+    }
+  ] : data.slice(0, 6).reverse();
+
+  // Expense breakdown (mock data - would parse from detailed Xero accounts)
+  const expenseBreakdown = [
+    { name: 'Wages & Salaries', value: currentMonth.expenses * 0.45 },
+    { name: 'Insurance', value: currentMonth.expenses * 0.15 },
+    { name: 'Equipment & Hire', value: currentMonth.expenses * 0.12 },
+    { name: 'Subscriptions', value: currentMonth.expenses * 0.08 },
+    { name: 'Rent', value: currentMonth.expenses * 0.10 },
+    { name: 'Other', value: currentMonth.expenses * 0.10 }
+  ];
 
   const fetchXeroData = async () => {
     setLoadingXero(true);
@@ -112,24 +161,32 @@ export default function NavarooVisionexDashboard() {
           : plData;
         
         setData(mergedData);
-        setUploadStatus(`✓ Successfully loaded ${mergedData.length} month(s) of data from Xero exports`);
+        setUploadStatus(`✓ Successfully loaded ${mergedData.length} month(s) of data`);
       } else {
-        setUploadStatus('⚠ No valid Xero data found. Please upload Profit & Loss report from Xero.');
+        setUploadStatus('⚠ No valid Xero data found');
       }
     } catch (error: any) {
       console.error('File upload error:', error);
-      setUploadStatus(`✗ Error: ${error.message || 'Could not parse Xero file.'}`);
+      setUploadStatus(`✗ Error: ${error.message}`);
     } finally {
       setUploading(false);
       setTimeout(() => setUploadStatus(''), 7000);
     }
   };
 
+  const handleForecastSubmit = () => {
+    if (forecastRevenue > 0) {
+      setShowForecast(true);
+      setUploadStatus('✓ Forecast applied to charts');
+      setTimeout(() => setUploadStatus(''), 3000);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-slate-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+        <div className="bg-white rounded-xl shadow-sm p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-900">Navaroo Pty Ltd</h1>
@@ -143,20 +200,19 @@ export default function NavarooVisionexDashboard() {
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${loadingXero ? 'animate-spin' : ''}`} />
-                  {loadingXero ? 'Loading...' : 'Refresh from Xero'}
+                  {loadingXero ? 'Loading...' : 'Refresh'}
                 </button>
               ) : (
                 <button
                   onClick={connectXero}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
                 >
-                  <LinkIcon className="w-4 h-4" />
                   Connect Xero
                 </button>
               )}
               <label className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors cursor-pointer flex items-center gap-2">
                 <Upload className="w-4 h-4" />
-                Upload Files
+                Upload
                 <input
                   type="file"
                   accept=".xlsx,.xls"
@@ -179,79 +235,162 @@ export default function NavarooVisionexDashboard() {
           )}
         </div>
 
-        {/* Current Month Overview */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+        {/* Executive Summary */}
+        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl shadow-lg p-6 text-white">
           <div className="flex items-center gap-2 mb-4">
-            <Calendar className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-semibold text-slate-900">{currentMonth.month}</h2>
+            <Activity className="w-6 h-6" />
+            <h2 className="text-2xl font-bold">Executive Summary - {currentMonth.month}</h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-green-700 text-sm font-medium">Revenue</span>
-                <DollarSign className="w-5 h-5 text-green-600" />
-              </div>
-              <p className="text-2xl font-bold text-green-900">
-                ${currentMonth.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <p className="text-blue-100 text-sm mb-1">Revenue</p>
+              <p className="text-3xl font-bold">${currentMonth.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</p>
+              <p className={`text-sm mt-1 flex items-center gap-1 ${revenueChange >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                {revenueChange >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                {Math.abs(revenueChange).toFixed(1)}% vs last month
               </p>
             </div>
-
-            <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-red-700 text-sm font-medium">Expenses</span>
-                <TrendingDown className="w-5 h-5 text-red-600" />
-              </div>
-              <p className="text-2xl font-bold text-red-900">
-                ${currentMonth.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            <div>
+              <p className="text-blue-100 text-sm mb-1">Expenses</p>
+              <p className="text-3xl font-bold">${currentMonth.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</p>
+              <p className={`text-sm mt-1 flex items-center gap-1 ${expensesChange <= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                {expensesChange >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                {Math.abs(expensesChange).toFixed(1)}% vs last month
               </p>
             </div>
-
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-blue-700 text-sm font-medium">Net Profit</span>
-                <TrendingUp className="w-5 h-5 text-blue-600" />
-              </div>
-              <p className="text-2xl font-bold text-blue-900">
-                ${currentMonth.profit.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            <div>
+              <p className="text-blue-100 text-sm mb-1">Net Profit</p>
+              <p className="text-3xl font-bold">${currentMonth.profit.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</p>
+              <p className={`text-sm mt-1 flex items-center gap-1 ${profitChange >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                {profitChange >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                {Math.abs(profitChange).toFixed(1)}% vs last month • {profitMargin.toFixed(1)}% margin
               </p>
-              <p className="text-sm text-blue-700 mt-1">{profitMargin}% margin</p>
             </div>
           </div>
         </div>
 
-        {/* Balance Sheet Overview */}
-        {(currentMonth.assets > 0 || currentMonth.liabilities > 0) && (
-          <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-slate-600" />
-              Balance Sheet
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-lg">
-                <span className="text-purple-700 text-sm font-medium block mb-2">Total Assets</span>
-                <p className="text-2xl font-bold text-purple-900">
-                  ${currentMonth.assets.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                </p>
-              </div>
-              <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-4 rounded-lg">
-                <span className="text-orange-700 text-sm font-medium block mb-2">Total Liabilities</span>
-                <p className="text-2xl font-bold text-orange-900">
-                  ${currentMonth.liabilities.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                </p>
-              </div>
-              <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 p-4 rounded-lg">
-                <span className="text-indigo-700 text-sm font-medium block mb-2">Equity</span>
-                <p className="text-2xl font-bold text-indigo-900">
-                  ${currentMonth.equity.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                </p>
-              </div>
+        {/* Cash Flow Chart */}
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">Cash Flow Analysis (Last 6 Months)</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={cashFlow}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" />
+              <YAxis />
+              <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
+              <Legend />
+              <Bar dataKey="inflow" fill="#10b981" name="Revenue" />
+              <Bar dataKey="outflow" fill="#ef4444" name="Expenses" />
+              <Bar dataKey="net" fill="#3b82f6" name="Net Cash Flow" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Revenue Forecasting Tool */}
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">Revenue Forecasting</h2>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Projected Revenue</label>
+              <input
+                type="number"
+                value={forecastRevenue || ''}
+                onChange={(e) => setForecastRevenue(Number(e.target.value))}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., 150000"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Projected Expenses</label>
+              <input
+                type="number"
+                value={forecastExpenses || ''}
+                onChange={(e) => setForecastExpenses(Number(e.target.value))}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="Leave blank for auto"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={handleForecastSubmit}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Apply Forecast
+              </button>
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={() => { setShowForecast(false); setForecastRevenue(0); setForecastExpenses(0); }}
+                className="w-full px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
+              >
+                Clear
+              </button>
             </div>
           </div>
-        )}
+
+          {/* Revenue Trend with Forecast */}
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={forecastData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" />
+              <YAxis />
+              <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
+              <Legend />
+              <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} name="Revenue" />
+              <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} name="Expenses" />
+              <Line type="monotone" dataKey="profit" stroke="#3b82f6" strokeWidth={2} name="Profit" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Expense Breakdown & Profit Margin */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Expense Breakdown */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-xl font-semibold text-slate-900 mb-4">Expense Breakdown</h2>
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={expenseBreakdown}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {expenseBreakdown.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Profit Margin Trend */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-xl font-semibold text-slate-900 mb-4">Profit Margin Trend</h2>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={data.slice(0, 6).reverse().map(m => ({
+                month: m.month,
+                margin: m.revenue > 0 ? (m.profit / m.revenue) * 100 : 0
+              }))}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
+                <Legend />
+                <Line type="monotone" dataKey="margin" stroke="#8b5cf6" strokeWidth={2} name="Profit Margin %" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
 
         {/* Historical Data Table */}
         {data.length > 1 && (
-          <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+          <div className="bg-white rounded-xl shadow-sm p-6">
             <h2 className="text-xl font-semibold text-slate-900 mb-4">Historical Performance</h2>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -262,27 +401,33 @@ export default function NavarooVisionexDashboard() {
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Expenses</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Profit</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Margin %</th>
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">MoM Change</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.map((month, index) => {
-                    const margin = month.revenue > 0 
-                      ? Math.round((month.profit / month.revenue) * 100)
+                    const margin = month.revenue > 0 ? (month.profit / month.revenue) * 100 : 0;
+                    const prevMonth = data[index + 1];
+                    const momChange = prevMonth && prevMonth.revenue > 0
+                      ? ((month.revenue - prevMonth.revenue) / prevMonth.revenue) * 100
                       : 0;
                     return (
                       <tr key={index} className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="py-3 px-4 text-sm text-slate-900 font-medium">{month.month}</td>
                         <td className="py-3 px-4 text-sm text-right text-slate-900">
-                          ${month.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          ${month.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
                         </td>
                         <td className="py-3 px-4 text-sm text-right text-slate-900">
-                          ${month.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          ${month.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-medium ${month.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          ${month.profit.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          ${month.profit.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-medium ${margin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {margin}%
+                          {margin.toFixed(1)}%
+                        </td>
+                        <td className={`py-3 px-4 text-sm text-right ${momChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {prevMonth ? `${momChange >= 0 ? '+' : ''}${momChange.toFixed(1)}%` : '-'}
                         </td>
                       </tr>
                     );
@@ -292,39 +437,6 @@ export default function NavarooVisionexDashboard() {
             </div>
           </div>
         )}
-
-        {/* Instructions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-blue-50 rounded-xl p-6">
-            <h3 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
-              <FileText className="w-5 h-5" />
-              Upload from Xero
-            </h3>
-            <ol className="list-decimal list-inside space-y-2 text-blue-800 text-sm">
-              <li>Log into Xero</li>
-              <li>Go to Reports → Profit and Loss</li>
-              <li>Select date range (last 12 months)</li>
-              <li>Export as Excel (.xlsx)</li>
-              <li>Upload here using "Upload Files"</li>
-            </ol>
-          </div>
-
-          <div className="bg-green-50 rounded-xl p-6">
-            <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
-              <LinkIcon className="w-5 h-5" />
-              Direct Xero Connection
-            </h3>
-            <ol className="list-decimal list-inside space-y-2 text-green-800 text-sm">
-              <li>Click "Connect Xero" above</li>
-              <li>Authorize access to your Xero account</li>
-              <li>Dashboard automatically pulls latest data</li>
-              <li>Click "Refresh" anytime for updated data</li>
-            </ol>
-            <p className="text-green-700 text-sm mt-4 font-medium">
-              No manual exports needed! Data updates with one click.
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );
