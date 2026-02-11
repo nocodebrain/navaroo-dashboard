@@ -379,7 +379,7 @@ export default function NavarooDashboard() {
                       outerRadius={70}
                       fill="#8884d8"
                       dataKey="amount"
-                      label={({ name, percentage }) => `${name} ${percentage.toFixed(0)}%`}
+                      label={(entry: any) => `${entry.name} ${entry.percentage.toFixed(0)}%`}
                       labelLine={false}
                     >
                       {currentMonth.expenseBreakdown.map((entry, index) => (
