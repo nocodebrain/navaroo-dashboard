@@ -1,57 +1,61 @@
 # Navaroo & Visionex Solutions Dashboard
 
-A modern business performance dashboard with monthly data upload functionality for Navaroo and Visionex Solutions.
+Business performance dashboard that **automatically parses Xero exports** with support for direct Xero API integration.
 
-## Features
+## ✅ What's Working Now
 
-✅ **Monthly Performance Overview**
-- Revenue, expenses, and profit tracking
-- Client metrics (active clients, new clients)
-- Tender performance (submissions, wins, win rate)
-- Profit margin calculations
+### Upload Your Xero Files
+No templates, no manual data entry. Just upload your existing Xero exports:
 
-✅ **File Upload System**
-- Upload Excel files (.xlsx, .xls) to update monthly data
-- Download template with correct column structure
-- Automatic data parsing and validation
-- Visual feedback on upload success/errors
+1. **Export from Xero:**
+   - Go to Reports → Profit and Loss
+   - Select date range (e.g., last 12 or 24 months)
+   - Click "Export" → Excel (.xlsx)
+   - Repeat for Balance Sheet (optional)
 
-✅ **Historical Data View**
-- Table view of all historical months
-- Track trends over time
-- Easy-to-read financial summaries
+2. **Upload to Dashboard:**
+   - Click "Upload Xero Files"
+   - Select your P&L file (and Balance Sheet if you have it)
+   - Dashboard automatically parses and displays all data
 
-✅ **Professional UI**
-- Modern, responsive design
-- Color-coded metrics (green = revenue/profit, red = expenses)
-- Mobile-friendly layout
-- Clear visual hierarchy
+3. **View Your Data:**
+   - Current month overview (Revenue, Expenses, Profit, Margin %)
+   - Balance Sheet summary (Assets, Liabilities, Equity)
+   - Historical table with all months from your export
 
-## How to Use
+### Supported Xero Reports
 
-### 1. Download Template
-Click the "Download Template" button to get an Excel file with the correct structure.
+- ✅ **Profit & Loss** (full monthly breakdown)
+- ✅ **Balance Sheet** (assets, liabilities, equity)
+- ✅ Automatically detects account types (revenue vs expenses)
+- ✅ Calculates profit margins
+- ✅ Displays 24+ months of historical data
 
-### 2. Fill in Your Data
-The template includes these columns:
-- **Month**: e.g., "January 2026"
-- **Revenue**: Total monthly revenue
-- **Expenses**: Total monthly expenses
-- **Profit**: Net profit (Revenue - Expenses)
-- **Active Clients**: Number of active clients
-- **New Clients**: New clients acquired this month
-- **Tenders Submitted**: Number of tenders submitted
-- **Tenders Won**: Number of tenders won
+## 🔗 Direct Xero Integration (Optional)
 
-### 3. Upload Data
-Click "Upload Data" and select your completed Excel file. The dashboard will automatically update.
+For automatic monthly updates without manual exports:
 
-### 4. View Results
-The dashboard displays:
-- Current month's key metrics
-- Profit margin percentage
-- Tender win rate percentage
-- Historical data table
+### Setup Requirements:
+1. Xero Developer Account
+2. OAuth 2.0 app credentials
+3. Environment variables configuration
+
+### Steps to Connect:
+1. Go to [developer.xero.com](https://developer.xero.com/app/manage)
+2. Create new app (OAuth 2.0)
+3. Add redirect URL: `http://localhost:3005/api/xero/callback`
+4. Enable scope: `accounting.reports.read`
+5. Get Client ID and Client Secret
+6. Add to `.env.local`:
+   ```
+   XERO_CLIENT_ID=your_client_id
+   XERO_CLIENT_SECRET=your_client_secret
+   XERO_REDIRECT_URI=http://localhost:3005/api/xero/callback
+   ```
+7. Click "Connect Xero" in dashboard
+8. Authorize access
+
+Once connected, the dashboard will automatically pull your latest Xero data monthly.
 
 ## Running Locally
 
@@ -62,59 +66,91 @@ npm install
 # Run development server
 npm run dev
 
-# Build for production
-npm run build
-
-# Start production server
-npm start
+# Open browser
+http://localhost:3005
 ```
-
-Open [http://localhost:3000](http://localhost:3000) to view the dashboard.
-
-## Tech Stack
-
-- **Next.js 15** - React framework
-- **TypeScript** - Type safety
-- **Tailwind CSS** - Styling
-- **XLSX** - Excel file parsing
-- **Lucide React** - Icons
-
-## Data Format
-
-The Excel file should have these exact column names (case-insensitive):
-- Month
-- Revenue
-- Expenses
-- Profit
-- Active Clients (or activeClients)
-- New Clients (or newClients)
-- Tenders Submitted (or tendersSubmitted)
-- Tenders Won (or tendersWon)
-
-## Future Enhancements
-
-- PDF data extraction (requires backend processing)
-- Data persistence (database integration)
-- Charts and graphs for trend visualization
-- Export functionality (PDF reports, Excel downloads)
-- Multi-user authentication
-- Data comparison (month-over-month, year-over-year)
 
 ## Deploy
 
-### Vercel (Recommended)
+### Vercel (Recommended for Xero OAuth)
 1. Push to GitHub
-2. Import repository in Vercel
-3. Deploy with one click
+2. Import in Vercel
+3. Add environment variables (Xero credentials)
+4. Update Xero redirect URL to your production domain
+5. Deploy
 
 ### Railway
 1. Push to GitHub
-2. Create new project from GitHub repo
-3. Railway auto-detects Next.js and deploys
+2. Create new project from repo
+3. Add environment variables
+4. Railway auto-deploys
 
-## License
+## Features
 
-MIT
+- 📊 **Revenue & Expenses Tracking** - Automatic categorization from Xero
+- 💰 **Profit Margin Calculation** - Real-time profitability metrics
+- 🏗️ **Balance Sheet Overview** - Assets, liabilities, equity at a glance
+- 📅 **Historical Data Table** - View trends over 12-24 months
+- 📤 **File Upload** - Drag & drop or click to upload Xero exports
+- 🔗 **Xero API Integration** - Optional direct sync (coming soon)
+- 📱 **Mobile Responsive** - Works on all devices
+
+## Data Privacy
+
+- Files are processed client-side (browser only)
+- No data sent to external servers unless Xero OAuth is enabled
+- Xero OAuth only requests `accounting.reports.read` (read-only)
+- No data storage on our servers (all calculations done in browser)
+
+## Tech Stack
+
+- **Next.js 15** - React framework with App Router
+- **TypeScript** - Type-safe code
+- **Tailwind CSS** - Modern UI styling
+- **XLSX** - Excel file parsing
+- **Lucide React** - Icon library
+- **Xero API** - Direct accounting integration (optional)
+
+## File Format
+
+The dashboard automatically parses standard Xero exports:
+
+**Profit & Loss Format:**
+- Header row with "Account" and month names
+- Revenue rows (Sales, Income accounts)
+- Expense rows (Wages, Rent, Insurance, etc.)
+- Automatically skips section totals and headers
+
+**Balance Sheet Format:**
+- Header row with "Account" and dates
+- Assets section
+- Liabilities section
+- Equity section
+
+No special formatting needed - just export from Xero as-is.
+
+## Troubleshooting
+
+**"Could not find header row"**
+- Make sure you're uploading a Xero report (not a custom Excel file)
+- File should have "Account" as the first column header
+
+**"No valid Xero data found"**
+- Check that the file contains monthly columns (Jan 2026, Feb 2026, etc.)
+- Try exporting with a different date range
+
+**Revenue shows as $0**
+- Check that your P&L has "Sales" or "Income" accounts
+- The parser looks for keywords like "sales", "income", "interest income"
+
+**Xero OAuth not working**
+- Verify environment variables are set correctly
+- Check redirect URL matches exactly in Xero app settings
+- Make sure app has `accounting.reports.read` scope enabled
+
+## Support
+
+Questions or issues? Open an issue on GitHub or contact Hash.
 
 ---
 
