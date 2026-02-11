@@ -8,6 +8,13 @@ export interface XeroMonthlyData {
   assets: number;
   liabilities: number;
   equity: number;
+  expenseBreakdown?: ExpenseCategory[];
+}
+
+export interface ExpenseCategory {
+  name: string;
+  amount: number;
+  percentage: number;
 }
 
 export interface XeroAccountRow {
@@ -21,7 +28,7 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
   const worksheet = workbook.Sheets[sheetName];
   const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-  // Find the header row (contains "Account" and month names)
+  // Find the header row
   let headerRowIndex = -1;
   let months: string[] = [];
   
@@ -29,7 +36,6 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
     const row = rawData[i];
     if (row[0] === 'Account' || row[0]?.toString().toLowerCase() === 'account') {
       headerRowIndex = i;
-      // Extract month columns (skip first column which is "Account")
       months = row.slice(1).filter((col: any) => col && col !== '').map((col: any) => col.toString());
       break;
     }
@@ -39,7 +45,6 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
     throw new Error('Could not find header row with "Account" column');
   }
 
-  // Section headers to skip (these are organizational rows, not actual accounts)
   const sectionHeaders = [
     'trading income',
     'cost of sales',
@@ -55,7 +60,7 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
     'total other income'
   ];
 
-  // Parse account rows
+  // Parse accounts with categories
   const accounts: XeroAccountRow[] = [];
   for (let i = headerRowIndex + 1; i < rawData.length; i++) {
     const row = rawData[i];
@@ -63,7 +68,6 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
     
     if (!accountName || accountName === '') continue;
     
-    // Skip section headers
     const accountLower = accountName.toLowerCase();
     if (sectionHeaders.some(header => accountLower === header || accountLower.includes('total ' + header))) {
       continue;
@@ -73,7 +77,6 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
     months.forEach((month, index) => {
       const value = row[index + 1];
       const numValue = parseFloat(value);
-      // Only add if it's a valid number
       values[month] = !isNaN(numValue) ? numValue : 0;
     });
     
@@ -83,58 +86,71 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
     });
   }
 
-  // Calculate monthly summaries
+  // Calculate monthly summaries with detailed expense breakdown
   const monthlyData: XeroMonthlyData[] = [];
   
   months.forEach(month => {
     let revenue = 0;
     let expenses = 0;
+    const expenseCategories: Map<string, number> = new Map();
 
     accounts.forEach(account => {
       const value = account.values[month] || 0;
       const accountLower = account.account.toLowerCase();
       
-      // Revenue accounts (look for "sales", "interest income", etc.)
+      // Revenue accounts
       if (accountLower.includes('sales') || 
           accountLower.includes('interest income') ||
           (accountLower.includes('income') && !accountLower.includes('cost'))) {
-        revenue += Math.abs(value); // Use absolute value in case of negative revenues
+        revenue += Math.abs(value);
       }
-      // Expense accounts
-      else if (value > 0 && (
-               accountLower.includes('wage') ||
-               accountLower.includes('salary') ||
-               accountLower.includes('super') ||
-               accountLower.includes('insurance') ||
-               accountLower.includes('rent') ||
-               accountLower.includes('equipment') ||
-               accountLower.includes('hire') ||
-               accountLower.includes('freight') ||
-               accountLower.includes('incolink') ||
-               accountLower.includes('professional') ||
-               accountLower.includes('advertising') ||
-               accountLower.includes('bank') ||
-               accountLower.includes('depreciation') ||
-               accountLower.includes('employee') ||
-               accountLower.includes('marketing') ||
-               accountLower.includes('motor') ||
-               accountLower.includes('phone') ||
-               accountLower.includes('postage') ||
-               accountLower.includes('printing') ||
-               accountLower.includes('protective') ||
-               accountLower.includes('staff') ||
-               accountLower.includes('subscription') ||
-               accountLower.includes('telephone') ||
-               accountLower.includes('tool') ||
-               accountLower.includes('travel') ||
-               accountLower.includes('workcover') ||
-               accountLower.includes('cost')
-             )) {
+      // Expense accounts - categorize them
+      else if (value > 0) {
         expenses += value;
+        
+        // Categorize expenses
+        if (accountLower.includes('wage') || accountLower.includes('salary')) {
+          expenseCategories.set('Wages & Salaries', (expenseCategories.get('Wages & Salaries') || 0) + value);
+        } else if (accountLower.includes('super')) {
+          expenseCategories.set('Superannuation', (expenseCategories.get('Superannuation') || 0) + value);
+        } else if (accountLower.includes('insurance') || accountLower.includes('incolink') || accountLower.includes('workcover')) {
+          expenseCategories.set('Insurance', (expenseCategories.get('Insurance') || 0) + value);
+        } else if (accountLower.includes('equipment') || accountLower.includes('hire') || accountLower.includes('tool')) {
+          expenseCategories.set('Equipment & Tools', (expenseCategories.get('Equipment & Tools') || 0) + value);
+        } else if (accountLower.includes('subscription')) {
+          expenseCategories.set('Subscriptions & Software', (expenseCategories.get('Subscriptions & Software') || 0) + value);
+        } else if (accountLower.includes('rent')) {
+          expenseCategories.set('Rent', (expenseCategories.get('Rent') || 0) + value);
+        } else if (accountLower.includes('professional') || accountLower.includes('legal') || accountLower.includes('accounting')) {
+          expenseCategories.set('Professional Services', (expenseCategories.get('Professional Services') || 0) + value);
+        } else if (accountLower.includes('motor') || accountLower.includes('vehicle') || accountLower.includes('fuel')) {
+          expenseCategories.set('Vehicle & Transport', (expenseCategories.get('Vehicle & Transport') || 0) + value);
+        } else if (accountLower.includes('marketing') || accountLower.includes('advertising')) {
+          expenseCategories.set('Marketing', (expenseCategories.get('Marketing') || 0) + value);
+        } else if (accountLower.includes('depreciation')) {
+          expenseCategories.set('Depreciation', (expenseCategories.get('Depreciation') || 0) + value);
+        } else if (accountLower.includes('freight') || accountLower.includes('delivery')) {
+          expenseCategories.set('Freight & Delivery', (expenseCategories.get('Freight & Delivery') || 0) + value);
+        } else if (accountLower.includes('staff') || accountLower.includes('training') || accountLower.includes('welfare')) {
+          expenseCategories.set('Staff Development', (expenseCategories.get('Staff Development') || 0) + value);
+        } else if (accountLower.includes('protective') || accountLower.includes('clothing')) {
+          expenseCategories.set('Safety & PPE', (expenseCategories.get('Safety & PPE') || 0) + value);
+        } else {
+          expenseCategories.set('Other Expenses', (expenseCategories.get('Other Expenses') || 0) + value);
+        }
       }
     });
 
     const profit = revenue - expenses;
+
+    // Convert expense categories to array with percentages
+    const expenseBreakdown: ExpenseCategory[] = Array.from(expenseCategories.entries())
+      .map(([name, amount]) => ({
+        name,
+        amount,
+        percentage: expenses > 0 ? (amount / expenses) * 100 : 0
+      }))
+      .sort((a, b) => b.amount - a.amount);
 
     monthlyData.push({
       month,
@@ -143,11 +159,12 @@ export function parseXeroProfitLoss(file: ArrayBuffer): XeroMonthlyData[] {
       profit,
       assets: 0,
       liabilities: 0,
-      equity: 0
+      equity: 0,
+      expenseBreakdown
     });
   });
 
-  return monthlyData; // Return in original order (newest first)
+  return monthlyData;
 }
 
 export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { assets: number; liabilities: number; equity: number }> {
@@ -156,7 +173,6 @@ export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { asset
   const worksheet = workbook.Sheets[sheetName];
   const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-  // Find the header row (Balance Sheet format has Account in column 1)
   let headerRowIndex = -1;
   let months: string[] = [];
   
@@ -165,7 +181,6 @@ export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { asset
     const col1 = row[1]?.toString().toLowerCase();
     if (col1 === 'account') {
       headerRowIndex = i;
-      // Months start from column 2
       months = row.slice(2).filter((col: any) => col && col !== '').map((col: any) => col.toString());
       break;
     }
@@ -181,7 +196,6 @@ export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { asset
     result[month] = { assets: 0, liabilities: 0, equity: 0 };
   });
 
-  // Parse balance sheet sections
   let currentSection: 'assets' | 'liabilities' | 'equity' | null = null;
   
   for (let i = headerRowIndex + 1; i < rawData.length; i++) {
@@ -197,7 +211,6 @@ export function parseXeroBalanceSheet(file: ArrayBuffer): Record<string, { asset
     } else if (label.includes('total assets') || 
                label.includes('total liabilities') || 
                label.includes('total equity')) {
-      // Sum row - use this for the section total
       if (currentSection) {
         months.forEach((month, index) => {
           const value = parseFloat(row[index + 2]) || 0;

@@ -2,23 +2,21 @@
 
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, TrendingUp, TrendingDown, DollarSign, Calendar, RefreshCw, AlertCircle, Activity } from 'lucide-react';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Upload, TrendingUp, TrendingDown, DollarSign, Calendar, RefreshCw, AlertCircle, Activity, Zap } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { parseXeroProfitLoss, parseXeroBalanceSheet, mergeXeroData, XeroMonthlyData } from '../lib/xero-parser';
 
-const COLORS = ['#10b981', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
-const defaultData: XeroMonthlyData[] = [
-  {
-    month: 'Feb 2026',
-    revenue: 0,
-    expenses: 0,
-    profit: 0,
-    assets: 0,
-    liabilities: 0,
-    equity: 0
-  }
-];
+const defaultData: XeroMonthlyData[] = [{
+  month: 'Feb 2026',
+  revenue: 0,
+  expenses: 0,
+  profit: 0,
+  assets: 0,
+  liabilities: 0,
+  equity: 0
+}];
 
 export default function NavarooFinancialDashboard() {
   const [data, setData] = useState<XeroMonthlyData[]>(defaultData);
@@ -43,7 +41,7 @@ export default function NavarooFinancialDashboard() {
   const currentMonth = data[0] || defaultData[0];
   const previousMonth = data[1] || currentMonth;
 
-  // Calculate month-over-month changes
+  // Calculate KPIs
   const revenueChange = previousMonth.revenue > 0 
     ? ((currentMonth.revenue - previousMonth.revenue) / previousMonth.revenue) * 100 
     : 0;
@@ -58,7 +56,17 @@ export default function NavarooFinancialDashboard() {
     ? (currentMonth.profit / currentMonth.revenue) * 100
     : 0;
 
-  // Calculate cash flow (simplified: revenue - expenses)
+  // Calculate burn rate (average monthly expenses over last 3 months)
+  const last3Months = data.slice(0, 3);
+  const avgMonthlyBurn = last3Months.length > 0
+    ? last3Months.reduce((sum, m) => sum + m.expenses, 0) / last3Months.length
+    : 0;
+
+  // Calculate runway (assuming current cash = assets - liabilities)
+  const currentCash = currentMonth.assets - currentMonth.liabilities;
+  const runway = avgMonthlyBurn > 0 ? currentCash / avgMonthlyBurn : 0;
+
+  // Cash flow data
   const cashFlow = data.slice(0, 6).reverse().map(month => ({
     month: month.month,
     inflow: month.revenue,
@@ -66,29 +74,19 @@ export default function NavarooFinancialDashboard() {
     net: month.profit
   }));
 
-  // Prepare forecast data
+  // Forecast data
   const forecastData = showForecast && forecastRevenue > 0 ? [
     ...data.slice(0, 6).reverse(),
     {
       month: 'Forecast',
       revenue: forecastRevenue,
-      expenses: forecastExpenses || (currentMonth.expenses * 1.05), // Default 5% increase
+      expenses: forecastExpenses || (currentMonth.expenses * 1.05),
       profit: forecastRevenue - (forecastExpenses || (currentMonth.expenses * 1.05)),
       assets: 0,
       liabilities: 0,
       equity: 0
     }
-  ] : data.slice(0, 6).reverse();
-
-  // Expense breakdown (mock data - would parse from detailed Xero accounts)
-  const expenseBreakdown = [
-    { name: 'Wages & Salaries', value: currentMonth.expenses * 0.45 },
-    { name: 'Insurance', value: currentMonth.expenses * 0.15 },
-    { name: 'Equipment & Hire', value: currentMonth.expenses * 0.12 },
-    { name: 'Subscriptions', value: currentMonth.expenses * 0.08 },
-    { name: 'Rent', value: currentMonth.expenses * 0.10 },
-    { name: 'Other', value: currentMonth.expenses * 0.10 }
-  ];
+  ] : data.slice(0, 12).reverse();
 
   const fetchXeroData = async () => {
     setLoadingXero(true);
@@ -106,7 +104,6 @@ export default function NavarooFinancialDashboard() {
         throw new Error(result.error || 'Failed to fetch Xero data');
       }
     } catch (error: any) {
-      console.error('Error fetching Xero data:', error);
       setUploadStatus(`✗ Error: ${error.message}`);
       setXeroConnected(false);
     } finally {
@@ -136,10 +133,8 @@ export default function NavarooFinancialDashboard() {
         const buffer = await file.arrayBuffer();
 
         if (fileName.includes('profit') || fileName.includes('p&l') || fileName.includes('pl')) {
-          setUploadStatus('Parsing Profit & Loss...');
           plData = parseXeroProfitLoss(buffer);
         } else if (fileName.includes('balance') || fileName.includes('bs')) {
-          setUploadStatus('Parsing Balance Sheet...');
           bsData = parseXeroBalanceSheet(buffer);
         } else {
           const workbook = XLSX.read(buffer, { type: 'array' });
@@ -147,8 +142,6 @@ export default function NavarooFinancialDashboard() {
           
           if (sheetName.includes('profit') || sheetName.includes('loss')) {
             plData = parseXeroProfitLoss(buffer);
-          } else if (sheetName.includes('balance')) {
-            bsData = parseXeroBalanceSheet(buffer);
           } else {
             plData = parseXeroProfitLoss(buffer);
           }
@@ -161,12 +154,11 @@ export default function NavarooFinancialDashboard() {
           : plData;
         
         setData(mergedData);
-        setUploadStatus(`✓ Successfully loaded ${mergedData.length} month(s) of data`);
+        setUploadStatus(`✓ Loaded ${mergedData.length} months • ${currentMonth.expenseBreakdown?.length || 0} expense categories`);
       } else {
-        setUploadStatus('⚠ No valid Xero data found');
+        setUploadStatus('⚠ No valid data found');
       }
     } catch (error: any) {
-      console.error('File upload error:', error);
       setUploadStatus(`✗ Error: ${error.message}`);
     } finally {
       setUploading(false);
@@ -177,42 +169,35 @@ export default function NavarooFinancialDashboard() {
   const handleForecastSubmit = () => {
     if (forecastRevenue > 0) {
       setShowForecast(true);
-      setUploadStatus('✓ Forecast applied to charts');
+      setUploadStatus('✓ Forecast applied');
       setTimeout(() => setUploadStatus(''), 3000);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/20 to-slate-50 p-4 md:p-6">
+      <div className="max-w-[1600px] mx-auto space-y-6">
         {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200/50 p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-900">Navaroo Pty Ltd</h1>
-              <p className="text-slate-600 mt-1">Financial Dashboard</p>
+              <p className="text-slate-600 mt-1">Financial Performance Dashboard</p>
             </div>
             <div className="flex gap-3">
-              {xeroConnected ? (
+              {xeroConnected && (
                 <button
                   onClick={fetchXeroData}
                   disabled={loadingXero}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  className="px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all flex items-center gap-2 disabled:opacity-50 shadow-sm"
                 >
                   <RefreshCw className={`w-4 h-4 ${loadingXero ? 'animate-spin' : ''}`} />
                   {loadingXero ? 'Loading...' : 'Refresh'}
                 </button>
-              ) : (
-                <button
-                  onClick={connectXero}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                >
-                  Connect Xero
-                </button>
               )}
-              <label className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors cursor-pointer flex items-center gap-2">
+              <label className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all cursor-pointer flex items-center gap-2 shadow-sm hover:shadow-md">
                 <Upload className="w-4 h-4" />
-                Upload
+                Upload Xero Export
                 <input
                   type="file"
                   accept=".xlsx,.xls"
@@ -225,10 +210,10 @@ export default function NavarooFinancialDashboard() {
             </div>
           </div>
           {uploadStatus && (
-            <div className={`mt-4 p-3 rounded-lg ${
-              uploadStatus.includes('✓') ? 'bg-green-50 text-green-700' :
-              uploadStatus.includes('✗') ? 'bg-red-50 text-red-700' :
-              'bg-yellow-50 text-yellow-700'
+            <div className={`mt-4 p-3 rounded-xl border ${
+              uploadStatus.includes('✓') ? 'bg-green-50 text-green-700 border-green-200' :
+              uploadStatus.includes('✗') ? 'bg-red-50 text-red-700 border-red-200' :
+              'bg-yellow-50 text-yellow-700 border-yellow-200'
             }`}>
               {uploadStatus}
             </div>
@@ -236,197 +221,233 @@ export default function NavarooFinancialDashboard() {
         </div>
 
         {/* Executive Summary */}
-        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl shadow-lg p-6 text-white">
-          <div className="flex items-center gap-2 mb-4">
-            <Activity className="w-6 h-6" />
-            <h2 className="text-2xl font-bold">Executive Summary - {currentMonth.month}</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-gradient-to-br from-blue-600 via-blue-700 to-blue-800 rounded-2xl shadow-xl p-8 text-white">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-3 bg-white/10 rounded-xl backdrop-blur-sm">
+              <Activity className="w-7 h-7" />
+            </div>
             <div>
-              <p className="text-blue-100 text-sm mb-1">Revenue</p>
+              <h2 className="text-2xl font-bold">Executive Summary</h2>
+              <p className="text-blue-100">{currentMonth.month}</p>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
+              <p className="text-blue-100 text-sm font-medium mb-2">Revenue</p>
               <p className="text-3xl font-bold">${currentMonth.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</p>
-              <p className={`text-sm mt-1 flex items-center gap-1 ${revenueChange >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+              <div className={`flex items-center gap-1 mt-2 text-sm font-medium ${revenueChange >= 0 ? 'text-green-300' : 'text-red-300'}`}>
                 {revenueChange >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {Math.abs(revenueChange).toFixed(1)}% vs last month
-              </p>
+                {Math.abs(revenueChange).toFixed(1)}% MoM
+              </div>
             </div>
-            <div>
-              <p className="text-blue-100 text-sm mb-1">Expenses</p>
+
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
+              <p className="text-blue-100 text-sm font-medium mb-2">Expenses</p>
               <p className="text-3xl font-bold">${currentMonth.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</p>
-              <p className={`text-sm mt-1 flex items-center gap-1 ${expensesChange <= 0 ? 'text-green-300' : 'text-red-300'}`}>
+              <div className={`flex items-center gap-1 mt-2 text-sm font-medium ${expensesChange <= 0 ? 'text-green-300' : 'text-red-300'}`}>
                 {expensesChange >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {Math.abs(expensesChange).toFixed(1)}% vs last month
-              </p>
+                {Math.abs(expensesChange).toFixed(1)}% MoM
+              </div>
             </div>
-            <div>
-              <p className="text-blue-100 text-sm mb-1">Net Profit</p>
+
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
+              <p className="text-blue-100 text-sm font-medium mb-2">Net Profit</p>
               <p className="text-3xl font-bold">${currentMonth.profit.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</p>
-              <p className={`text-sm mt-1 flex items-center gap-1 ${profitChange >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+              <div className={`flex items-center gap-1 mt-2 text-sm font-medium ${profitChange >= 0 ? 'text-green-300' : 'text-red-300'}`}>
                 {profitChange >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {Math.abs(profitChange).toFixed(1)}% vs last month • {profitMargin.toFixed(1)}% margin
-              </p>
+                {Math.abs(profitChange).toFixed(1)}% MoM • {profitMargin.toFixed(1)}% margin
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
+              <p className="text-blue-100 text-sm font-medium mb-2">Cash Runway</p>
+              <p className="text-3xl font-bold">{runway > 0 ? `${runway.toFixed(1)}` : '-'} <span className="text-xl font-normal">months</span></p>
+              <p className="text-blue-100 text-sm mt-2">Burn: ${avgMonthlyBurn.toLocaleString('en-AU', { minimumFractionDigits: 0 })}/mo</p>
             </div>
           </div>
-        </div>
-
-        {/* Cash Flow Chart */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-xl font-semibold text-slate-900 mb-4">Cash Flow Analysis (Last 6 Months)</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={cashFlow}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
-              <Legend />
-              <Bar dataKey="inflow" fill="#10b981" name="Revenue" />
-              <Bar dataKey="outflow" fill="#ef4444" name="Expenses" />
-              <Bar dataKey="net" fill="#3b82f6" name="Net Cash Flow" />
-            </BarChart>
-          </ResponsiveContainer>
         </div>
 
         {/* Revenue Forecasting Tool */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-xl font-semibold text-slate-900 mb-4">Revenue Forecasting</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Projected Revenue</label>
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200/50 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Zap className="w-6 h-6 text-blue-600" />
+            <h2 className="text-xl font-bold text-slate-900">Revenue Forecast Model</h2>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Projected Monthly Revenue</label>
               <input
                 type="number"
                 value={forecastRevenue || ''}
                 onChange={(e) => setForecastRevenue(Number(e.target.value))}
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
                 placeholder="e.g., 150000"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Projected Expenses</label>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Projected Monthly Expenses (optional)</label>
               <input
                 type="number"
                 value={forecastExpenses || ''}
                 onChange={(e) => setForecastExpenses(Number(e.target.value))}
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder="Leave blank for auto"
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
+                placeholder="Auto-calculated if blank"
               />
             </div>
-            <div className="flex items-end">
+            <div className="flex flex-col gap-2">
               <button
                 onClick={handleForecastSubmit}
-                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-medium shadow-sm hover:shadow-md"
               >
-                Apply Forecast
+                Apply
               </button>
-            </div>
-            <div className="flex items-end">
               <button
                 onClick={() => { setShowForecast(false); setForecastRevenue(0); setForecastExpenses(0); }}
-                className="w-full px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
+                className="flex-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-all font-medium"
               >
                 Clear
               </button>
             </div>
           </div>
 
-          {/* Revenue Trend with Forecast */}
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={forecastData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
-              <Legend />
-              <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} name="Revenue" />
-              <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} name="Expenses" />
-              <Line type="monotone" dataKey="profit" stroke="#3b82f6" strokeWidth={2} name="Profit" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Expense Breakdown & Profit Margin */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Expense Breakdown */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Expense Breakdown</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={expenseBreakdown}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {expenseBreakdown.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Profit Margin Trend */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Profit Margin Trend</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={data.slice(0, 6).reverse().map(m => ({
-                month: m.month,
-                margin: m.revenue > 0 ? (m.profit / m.revenue) * 100 : 0
-              }))}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
+          {/* Revenue Trend Chart */}
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={forecastData}>
+                <defs>
+                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="month" stroke="#64748b" />
+                <YAxis stroke="#64748b" />
+                <Tooltip 
+                  formatter={(value) => `$${Number(value).toLocaleString()}`}
+                  contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
+                />
                 <Legend />
-                <Line type="monotone" dataKey="margin" stroke="#8b5cf6" strokeWidth={2} name="Profit Margin %" />
-              </LineChart>
+                <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRevenue)" strokeWidth={2} name="Revenue" />
+                <Area type="monotone" dataKey="expenses" stroke="#ef4444" fillOpacity={1} fill="url(#colorExpenses)" strokeWidth={2} name="Expenses" />
+                <Line type="monotone" dataKey="profit" stroke="#3b82f6" strokeWidth={3} name="Profit" dot={{ fill: '#3b82f6', r: 4 }} />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Historical Data Table */}
+        {/* Cash Flow + Expense Breakdown */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Cash Flow Analysis */}
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200/50 p-6">
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Cash Flow Analysis</h2>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={cashFlow}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="month" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                  <Legend />
+                  <Bar dataKey="inflow" fill="#10b981" name="Inflow" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="outflow" fill="#ef4444" name="Outflow" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="net" fill="#3b82f6" name="Net" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Expense Breakdown */}
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200/50 p-6">
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Expense Breakdown - {currentMonth.month}</h2>
+            {currentMonth.expenseBreakdown && currentMonth.expenseBreakdown.length > 0 ? (
+              <>
+                <div className="h-48 mb-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={currentMonth.expenseBreakdown}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        outerRadius={70}
+                        fill="#8884d8"
+                        dataKey="amount"
+                      >
+                        {currentMonth.expenseBreakdown.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="space-y-2">
+                  {currentMonth.expenseBreakdown.slice(0, 6).map((category, index) => (
+                    <div key={index} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
+                        <span className="text-slate-700">{category.name}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-500 text-xs">{category.percentage.toFixed(1)}%</span>
+                        <span className="font-semibold text-slate-900">${category.amount.toLocaleString('en-AU', { minimumFractionDigits: 0 })}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="text-slate-500 text-center py-8">Upload data to see expense breakdown</p>
+            )}
+          </div>
+        </div>
+
+        {/* Historical Performance Table */}
         {data.length > 1 && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Historical Performance</h2>
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-slate-200/50 p-6">
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Historical Performance</h2>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Month</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Revenue</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Expenses</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Profit</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Margin %</th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">MoM Change</th>
+                  <tr className="border-b-2 border-slate-200">
+                    <th className="text-left py-4 px-4 text-sm font-semibold text-slate-700">Month</th>
+                    <th className="text-right py-4 px-4 text-sm font-semibold text-slate-700">Revenue</th>
+                    <th className="text-right py-4 px-4 text-sm font-semibold text-slate-700">Expenses</th>
+                    <th className="text-right py-4 px-4 text-sm font-semibold text-slate-700">Profit</th>
+                    <th className="text-right py-4 px-4 text-sm font-semibold text-slate-700">Margin</th>
+                    <th className="text-right py-4 px-4 text-sm font-semibold text-slate-700">MoM</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((month, index) => {
+                  {data.slice(0, 12).map((month, index) => {
                     const margin = month.revenue > 0 ? (month.profit / month.revenue) * 100 : 0;
                     const prevMonth = data[index + 1];
                     const momChange = prevMonth && prevMonth.revenue > 0
                       ? ((month.revenue - prevMonth.revenue) / prevMonth.revenue) * 100
                       : 0;
                     return (
-                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="py-3 px-4 text-sm text-slate-900 font-medium">{month.month}</td>
-                        <td className="py-3 px-4 text-sm text-right text-slate-900">
+                      <tr key={index} className="border-b border-slate-100 hover:bg-blue-50/50 transition-colors">
+                        <td className="py-4 px-4 text-sm text-slate-900 font-medium">{month.month}</td>
+                        <td className="py-4 px-4 text-sm text-right text-slate-900 font-medium">
                           ${month.revenue.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
                         </td>
-                        <td className="py-3 px-4 text-sm text-right text-slate-900">
+                        <td className="py-4 px-4 text-sm text-right text-slate-600">
                           ${month.expenses.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
                         </td>
-                        <td className={`py-3 px-4 text-sm text-right font-medium ${month.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className={`py-4 px-4 text-sm text-right font-bold ${month.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           ${month.profit.toLocaleString('en-AU', { minimumFractionDigits: 0 })}
                         </td>
-                        <td className={`py-3 px-4 text-sm text-right font-medium ${margin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className={`py-4 px-4 text-sm text-right font-semibold ${margin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {margin.toFixed(1)}%
                         </td>
-                        <td className={`py-3 px-4 text-sm text-right ${momChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className={`py-4 px-4 text-sm text-right font-medium ${momChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {prevMonth ? `${momChange >= 0 ? '+' : ''}${momChange.toFixed(1)}%` : '-'}
                         </td>
                       </tr>
